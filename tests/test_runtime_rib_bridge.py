@@ -22,6 +22,24 @@ class MarkerLLMBridge:
         }
 
 
+class DirectSectionLLMBridge:
+    """Expose whether interpretation received the section or a compatibility projection."""
+
+    model_name = "direct-section-test"
+    temperature = 0.0
+    system_prompt_version = "v1"
+
+    def resolve(self, request, mb_view=None):
+        return {
+            "type": "direct_reply",
+            "payload": (
+                "direct-rib-section"
+                if isinstance(request, RIBSection)
+                else "projected-business-input"
+            ),
+        }
+
+
 def test_runtime_bridge_acquires_request_section_before_legacy_interpretation():
     runtime = EnterpriseRuntimeRIBBridge()
     raw = BusinessInput(
@@ -35,7 +53,7 @@ def test_runtime_bridge_acquires_request_section_before_legacy_interpretation():
     result = runtime.dispatch_ticket(raw)
     snapshot = runtime.pending_snapshots[result.ticket_id]
 
-    assert runtime.migration_stage == "P1_P5_RIB_OPERATIONAL_H_CUTOVER"
+    assert runtime.migration_stage == "P8_SUBSEQUENT_RIB_DIRECT_INTERPRETATION"
     assert isinstance(runtime.h_state, V23OperationalHStateAdapter)
     assert isinstance(snapshot.rib_section, RIBSection)
     assert snapshot.raw_business_input is raw
@@ -44,7 +62,65 @@ def test_runtime_bridge_acquires_request_section_before_legacy_interpretation():
     assert snapshot.efp is not raw
     assert snapshot.efp.metadata["rib_section_id"] == snapshot.rib_section.section_id
     assert snapshot.efp.metadata["interaction_series_id"] == "bridge-series"
-    assert snapshot.interaction_semantic_version == "core-v2.3-rib-operational-h"
+    assert snapshot.interaction_semantic_version == "core-v2.3-rib-p8-subsequent-direct"
+
+
+def test_request_rib_section_is_directly_interpretable_without_projection():
+    runtime = EnterpriseRuntimeRIBBridge(llm_bridge=MarkerLLMBridge())
+    raw = BusinessInput(
+        "BRIDGE-DIRECT-REQUEST",
+        "operator",
+        "workflow",
+        "inspect state",
+        metadata={"interaction_series_id": "direct-series"},
+        created_at="2026-09-14T10:00:00+00:00",
+    )
+    runtime.dispatch_ticket(raw)
+    snapshot = runtime.pending_snapshots[raw.ticket_id]
+
+    section = snapshot.rib_section
+    assert section.query_text == raw.query_text
+    assert section.category == raw.category
+    assert section.ticket_id == raw.ticket_id
+    assert section.user_id == raw.user_id
+    assert section.created_at == raw.created_at
+    assert section.metadata["interaction_series_id"] == "direct-series"
+
+    direct = snapshot.frozen_context.interpret_efp(section)
+    projected = snapshot.frozen_context.interpret_efp(section.to_business_input())
+
+    assert direct == projected
+
+
+def test_subsequent_canonical_f_prime_receives_rib_section_not_projection():
+    runtime = EnterpriseRuntimeRIBBridge(llm_bridge=DirectSectionLLMBridge())
+    raw = BusinessInput(
+        "BRIDGE-DIRECT-SUBSEQUENT",
+        "operator",
+        "workflow",
+        "inspect state",
+        created_at="2026-09-14T10:05:00+00:00",
+    )
+    runtime.dispatch_ticket(raw)
+
+    runtime.resolve_ticket_feedback(
+        raw.ticket_id,
+        FeedbackResult(
+            user_resolved=False,
+            feedback_comment="still unresolved",
+            observed_at="2026-09-14T10:06:00+00:00",
+        ),
+    )
+
+    snapshot = runtime.resolved_snapshots[-1]
+    assert isinstance(snapshot.rib_section_next, RIBSection)
+    assert snapshot.rib_section_next.is_prime
+    assert snapshot.rib_section_next.metadata["is_efp_prime"] is True
+    assert snapshot.v23_f_prime.content == "direct-rib-section"
+    # Initial product dispatch still crosses the explicit P8 compatibility boundary.
+    assert snapshot.f_pred.content == "projected-business-input"
+    assert snapshot.v23_mismatch is not None
+    assert snapshot.v23_mismatch.value > 0.0
 
 
 def test_runtime_bridge_acquires_subsequent_section_and_records_separate_v23_states():
