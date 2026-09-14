@@ -1,18 +1,17 @@
-"""Recompilation requests derived from immutable lifecycle observations."""
+"""Recompilation requests derived from immutable Function lifecycle observations."""
 
 from dataclasses import dataclass
 from typing import Optional
 
-from .activation_types import ActiveCompiledMB
+from .activation_types import ActiveFunction, activate_promoted_artifact
+from .compiled_function_types import CompiledFunction, CompiledFunctionArtifact
 from .contracts import BoundaryContext, Provenance
 from .deactivation_types import DeactivationRecord
 from .function_types import FunctionDescription
-from .activation_types import ActiveCompiledMB, activate_promoted_artifact
 from .promotion_types import PromotionDecision, PromotionDecisionStatus
 from .similarity_types import RelationConstraintProfile
 from .evolution_types import AdaptiveMBProfile
 from .evolution_types import (
-    CompiledMB,
     CompilationRecord,
     CompilationValidationStatus,
     FunctionCandidate,
@@ -28,7 +27,7 @@ from .evolution_types import (
 class RecompilationRequest:
     """A request to inspect or rebuild a Function; not a compiled result."""
 
-    active: ActiveCompiledMB
+    active: ActiveFunction
     deactivation: DeactivationRecord
     context: BoundaryContext
     evaluator: FunctionDescription
@@ -37,16 +36,16 @@ class RecompilationRequest:
 
     def __post_init__(self) -> None:
         if self.deactivation.active != self.active:
-            raise ValueError("RecompilationRequestのActive artifactが一致していません")
+            raise ValueError("RecompilationRequestのActive Functionが一致していません")
         if not isinstance(self.reason, str):
             raise TypeError("reasonは文字列である必要があります")
 
 
 @dataclass(frozen=True)
 class ReplacementCandidate:
-    """Candidate lineage from a prior Compiled M_B to a vNext Function."""
+    """Candidate lineage from a prior compiled Function to a vNext Function."""
 
-    predecessor: CompiledMB
+    predecessor: CompiledFunctionArtifact
     request: RecompilationRequest
     candidate: FunctionCandidate
     structure_delta: StructureDelta
@@ -60,12 +59,12 @@ class ReplacementCandidate:
 
 @dataclass(frozen=True)
 class CompiledReplacement:
-    """A validated vNext Compiled M_B with explicit predecessor lineage."""
+    """A validated vNext compiled Function with explicit predecessor lineage."""
 
-    predecessor: CompiledMB
+    predecessor: CompiledFunctionArtifact
     replacement: ReplacementCandidate
     validation: CompilationRecord
-    compiled: CompiledMB
+    compiled: CompiledFunction
 
     def __post_init__(self) -> None:
         if self.replacement.predecessor != self.predecessor:
@@ -79,7 +78,7 @@ class CompiledReplacement:
 
 
 def request_recompilation(
-    active: ActiveCompiledMB,
+    active: ActiveFunction,
     deactivation: DeactivationRecord,
     context: BoundaryContext,
     *,
@@ -87,7 +86,7 @@ def request_recompilation(
     evaluator: FunctionDescription = FunctionDescription("rdl_core.recompilation_policy", "0"),
     provenance: Optional[Provenance] = None,
 ) -> RecompilationRequest:
-    """Create a reinspection request without mutating the active artifact."""
+    """Create a reinspection request without mutating the active Function."""
     return RecompilationRequest(
         active, deactivation, context, evaluator, reason=reason, provenance=provenance,
     )
@@ -167,8 +166,8 @@ def materialize_compiled_replacement(
     replacement: ReplacementCandidate,
     validation: CompilationRecord,
 ) -> CompiledReplacement:
-    """Materialize a replacement only after validation success."""
-    compiled = CompiledMB(
+    """Materialize a canonical compiled Function only after validation success."""
+    compiled = CompiledFunction(
         replacement.candidate.function,
         replacement.candidate.structure,
         validation,
@@ -180,8 +179,8 @@ def activate_compiled_replacement(
     replacement: CompiledReplacement,
     promotion: PromotionDecision,
     context: BoundaryContext,
-) -> ActiveCompiledMB:
-    """Return a vNext Active artifact only from a matching approved decision."""
+) -> ActiveFunction:
+    """Return a vNext Active Function only from a matching approved decision."""
     if promotion.artifact != replacement.compiled:
         raise ValueError("ReplacementのPromotion対象Artifactが一致していません")
     if promotion.status != PromotionDecisionStatus.APPROVED:
