@@ -122,9 +122,14 @@ from .evolution_types import (
     record_compilation_validation,
     compile_validated_candidate,
 )
+from .compiled_function_types import (
+    CompiledFunction,
+    CompiledFunctionArtifact,
+    as_compiled_function,
+)
 from .rupture_types import RuptureObservation, RuptureObservationStatus, record_rupture_observation
 from .promotion_types import PromotionDecision, PromotionDecisionStatus, PromotionPolicyDescription, evaluate_promotion
-from .activation_types import ActiveCompiledMB, activate_promoted_artifact
+from .activation_types import ActiveFunction, ActiveCompiledMB, activate_promoted_artifact
 from .deactivation_types import DeactivationRecord, DeactivationStatus, record_deactivation
 from .registry_types import CurrentFunctionState, RegistryStatus, project_current_function_state
 from .recompilation_types import (
@@ -243,6 +248,9 @@ __all__ = [
     "compare_structure_candidates",
     "FunctionCandidate",
     "CompilationRecord",
+    "CompiledFunction",
+    "CompiledFunctionArtifact",
+    "as_compiled_function",
     "CompiledMB",
     "RuptureObservation",
     "RuptureObservationStatus",
@@ -251,6 +259,7 @@ __all__ = [
     "PromotionDecisionStatus",
     "PromotionPolicyDescription",
     "evaluate_promotion",
+    "ActiveFunction",
     "ActiveCompiledMB",
     "activate_promoted_artifact",
     "DeactivationRecord",
