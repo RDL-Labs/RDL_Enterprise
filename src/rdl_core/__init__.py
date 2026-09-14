@@ -127,7 +127,13 @@ from .compiled_function_types import (
     CompiledFunctionArtifact,
     as_compiled_function,
 )
-from .conditional_compiled_function_types import ConditionalCompiledFunction
+from .conditional_compiled_function_types import (
+    ConditionalCompiledFunction,
+    ConditionalFunctionPromotionRecord,
+    ConditionalFunctionActivationRecord,
+    evaluate_conditional_function_promotion,
+    activate_conditional_function_promotion,
+)
 from .rupture_types import RuptureObservation, RuptureObservationStatus, record_rupture_observation
 from .promotion_types import PromotionDecision, PromotionDecisionStatus, PromotionPolicyDescription, evaluate_promotion
 from .activation_types import ActiveFunction, ActiveCompiledMB, activate_promoted_artifact
@@ -317,6 +323,10 @@ __all__ = [
     "ConditionalCompilationRecord",
     "ConditionalCompilationEvaluation",
     "ConditionalCompiledFunction",
+    "ConditionalFunctionPromotionRecord",
+    "ConditionalFunctionActivationRecord",
+    "evaluate_conditional_function_promotion",
+    "activate_conditional_function_promotion",
     "ConditionalCompiledMB",
     "ConditionalPromotionRecord",
     "ConditionalActivationRecord",
