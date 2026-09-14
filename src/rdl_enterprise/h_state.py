@@ -1,17 +1,31 @@
-import math
-from typing import Dict, Optional, Tuple, Any
-from dataclasses import dataclass, field
+from typing import Dict, Optional, Tuple
+from dataclasses import dataclass
+
 
 @dataclass
 class HeatVector:
-    prediction: float = 0.0  # SPEC本来の予測誤差熱 (重み 1.0)
-    input_err: float = 0.0   # 入力補助熱 (重み 0.4)
+    prediction: float = 0.0  # legacy retained F/F' mismatch component
+    # Pre-v2.3 compatibility field. This is an Enterprise acquisition/input
+    # metric that legacy Runtime still mixes into total heat. It is NOT Core H.
+    input_err: float = 0.0
 
     def total(self, w_pred: float = 1.0, w_input: float = 0.4) -> float:
+        """Legacy total used by the pre-v2.3 Runtime compatibility path."""
         return w_pred * self.prediction + w_input * self.input_err
 
 
 class HState:
+    """Legacy Enterprise heat state kept for Runtime compatibility.
+
+    This class predates Core v2.3 role separation. In particular, its
+    ``input_err`` component is not Core H. New migration work should use
+    ``UnresolvedMismatchState`` and ``ObservationCoverageState`` from
+    ``mismatch_state.py``.
+
+    The class remains operational while the existing Runtime is migrated in
+    stages; keeping it does not make its full scalar policy a Core primitive.
+    """
+
     def __init__(
         self,
         theta_0: float = 2.0,
@@ -24,15 +38,15 @@ class HState:
         self.w_pred = w_pred
         self.w_input = w_input
 
-        # ノード別またはドメイン別の熱管理: node_id -> HeatVector (本番用)
+        # ノード別またはドメイン別のlegacy heat管理: node_id -> HeatVector
         self.node_heats: Dict[str, HeatVector] = {}
-        # バージョン別複合キー熱管理: (mb_version, node_id) -> HeatVector
+        # バージョン別複合キーheat管理: (mb_version, node_id) -> HeatVector
         self.versioned_heats: Dict[Tuple[str, str], HeatVector] = {}
-        # バージョン別観測統計プール (カナリアでの観測統計混入防止)
+        # バージョン別coverage観測統計プール
         self.versioned_observations: Dict[str, Dict[str, int]] = {}
-        # 全体グローバル熱 (本番用)
         self.global_heat = HeatVector()
-        # 観測可能な残存指標プール (本番用)
+        # Enterprise-local coverage / unresolved-observation counters.
+        # These counters do NOT measure Core xi.
         self.unclassified_count = 0
         self.missing_info_count = 0
         self.unknown_input_count = 0
@@ -48,17 +62,16 @@ class HState:
         is_canary: bool = False,
         opposing_constraint_strength: float = 1.0,
     ):
-        """
-        誤差 E を熱として蓄積。
-        is_canary=True の場合は本番の node_heats / global_heat を汚染せず、
-        versioned_heats[(mb_version, node_id)] にのみ隔離蓄積する。
+        """Legacy heat accumulation.
 
-        opposing_constraint_strength: 衝突した関係拘束の強さ（RuptureProbe から供給）
-          BASE v2.0 §4.2 整合: 強い拘束と衝突した E は大きく保持する。
-          H += mismatch * opposing_constraint_strength
-          デフォルト 1.0 (後方互換: 従来通りの発熱量)
+        ``pred_err`` may represent retained F/F' mismatch in the current
+        Runtime. ``input_err`` is a pre-v2.3 compatibility metric and must not
+        be interpreted as Core E/H. The v2.3 shadow path does not mix it into
+        ``UnresolvedMismatchState``.
+
+        ``opposing_constraint_strength`` is an Enterprise Standard-Model
+        weighting parameter, not a mandatory Core law.
         """
-        # 衝突した拘束の強さで E を重みづけ
         weighted_pred_err = pred_err * max(0.0, opposing_constraint_strength)
         weighted_input_err = input_err * max(0.0, opposing_constraint_strength)
 
@@ -69,7 +82,6 @@ class HState:
         self.versioned_heats[v_key].prediction += weighted_pred_err
         self.versioned_heats[v_key].input_err += weighted_input_err
 
-        # カナリア案件は本番熱状態を汚染させない
         if not is_canary:
             if node_id:
                 if node_id not in self.node_heats:
@@ -81,11 +93,11 @@ class HState:
             self.global_heat.input_err += weighted_input_err
 
     def get_heat_for_version(self, node_id: str, mb_version: str = "prod") -> HeatVector:
-        """特定バージョンのノード熱を取得"""
+        """特定バージョンのlegacy heatを取得。"""
         return self.versioned_heats.get((mb_version, node_id), HeatVector())
 
     def clear_version_heat(self, mb_version: str):
-        """ロールバック時などに特定バージョンの熱および観測統計を全消去"""
+        """ロールバック時などに特定バージョンのheatおよび観測統計を全消去。"""
         keys_to_del = [k for k in self.versioned_heats if k[0] == mb_version]
         for k in keys_to_del:
             del self.versioned_heats[k]
@@ -101,7 +113,12 @@ class HState:
         mb_version: str = "prod",
         is_canary: bool = False,
     ):
-        """ξ_obs（観測可能な残存指標）の統計を更新 (is_canary=True時は本番統計を汚染しない)"""
+        """Update Enterprise-local coverage statistics.
+
+        Historical code called the derived score ``xi_obs``. Core v2.3 does
+        not permit that identification: these are modeled observable rates,
+        not the unrecovered relation ``xi``.
+        """
         if is_canary:
             if mb_version not in self.versioned_observations:
                 self.versioned_observations[mb_version] = {
@@ -123,7 +140,6 @@ class HState:
                 pool["rejection_events_count"] += 1
             return
 
-        # 本番統計
         self.total_tickets += 1
         if unclassified:
             self.unclassified_count += 1
@@ -134,11 +150,8 @@ class HState:
         if rejected:
             self.rejection_events_count += 1
 
-    def xi_obs(self, mb_version: str = "prod") -> float:
-        """
-        観測可能残存指標 ξ_obs ∈ [0.0, 1.0]
-        未分類率、情報欠落率、未知率、差し戻し率の加重平均
-        """
+    def coverage_gap_score(self, mb_version: str = "prod") -> float:
+        """Enterprise-local bounded coverage score in [0, 1]; NOT Core xi."""
         if mb_version != "prod" and mb_version in self.versioned_observations:
             pool = self.versioned_observations[mb_version]
             total = pool["total_tickets"]
@@ -156,52 +169,50 @@ class HState:
         r_miss = self.missing_info_count / self.total_tickets
         r_unknown = self.unknown_input_count / self.total_tickets
         r_reject = self.rejection_events_count / self.total_tickets
-
-        # 加重平均
         return min(1.0, 0.3 * r_unclass + 0.2 * r_miss + 0.3 * r_unknown + 0.2 * r_reject)
 
+    def xi_obs(self, mb_version: str = "prod") -> float:
+        """Deprecated compatibility alias for ``coverage_gap_score``.
+
+        The return value is NOT an observation or estimate of Core ``xi``.
+        New code must call ``coverage_gap_score`` instead.
+        """
+        return self.coverage_gap_score(mb_version=mb_version)
+
     def theta_eff(self, mb_version: str = "prod") -> float:
+        """Legacy Enterprise coverage-adjusted threshold policy.
+
+        This is an Enterprise policy:
+
+            theta_eff = max(0.5, theta_0 - 0.8 * coverage_gap_score)
+
+        It is NOT a Core rule ``theta = theta(xi)``.
         """
-        有効判定境界 θ_eff = θ0 - g(ξ_obs)
-        g(ξ_obs) = 0.8 * ξ_obs (最大0.8引き下げ、下限0.5ガード)
-        """
-        xi = self.xi_obs(mb_version=mb_version)
-        g_xi = 0.8 * xi
-        return max(0.5, self.theta_0 - g_xi)
+        coverage = self.coverage_gap_score(mb_version=mb_version)
+        return max(0.5, self.theta_0 - 0.8 * coverage)
 
     def theta_eff_for_base(self, base_threshold: float, mb_version: str = "prod") -> float:
-        """Apply the existing observation-context adjustment to a revision base."""
-        xi = self.xi_obs(mb_version=mb_version)
-        return max(0.5, base_threshold - 0.8 * xi)
+        """Apply the legacy Enterprise coverage policy to a revision base."""
+        coverage = self.coverage_gap_score(mb_version=mb_version)
+        return max(0.5, base_threshold - 0.8 * coverage)
 
     def dissipate(self, node_inertias: Dict[str, float]):
-        """
-        熱の受動的自然散逸（冷却）
-        dH/dt = -γ / (1 + I(M_B)) * H
+        """Legacy passive dissipation Standard Model.
 
-        【旧設計からの変更】BASE v2.0 §4.2 整合：
-        慣性 I(M_B) が高い（強く結晶化した）構造に衝突した不整合 E は、
-        むしろ散逸しにくい（H を保持しやすい）。
-        旧: cooling_rate = γ*(1 + I)  → 慣性高い = 早く冷える（危険: 古参構造が反証を忘れやすくなる）
-        新: cooling_rate = γ/(1 + I)  → 慣性高い = 冷えにくい → H が下がらず → 再検査へ
+        The dependence on ``I(M_B)`` is an Enterprise implementation candidate,
+        not a mandatory Core law.
         """
         for nid, heat in list(self.node_heats.items()):
             inertia = node_inertias.get(nid, 0.5)
-            # 慣性が高いほど cooling_rate が小さい（熱が残りやすい）
             cooling_rate = min(0.3, self.gamma / (1.0 + inertia))
             heat.prediction *= (1.0 - cooling_rate)
             heat.input_err *= (1.0 - cooling_rate)
 
-        # グローバル熱もわずかに散逸
         self.global_heat.prediction *= (1.0 - self.gamma)
         self.global_heat.input_err *= (1.0 - self.gamma)
 
     def should_leap(self, node_id: Optional[str] = None) -> Tuple[bool, str, float]:
-        """
-        H >= θ_eff の判定
-        特定のノード、または全体の中で最も熱いノードが閾値を超えたかを返す
-        Returns: (should_leap, hot_node_id, current_heat)
-        """
+        """Legacy Runtime transition check using its Enterprise threshold policy."""
         threshold = self.theta_eff()
 
         if node_id and node_id in self.node_heats:
@@ -209,7 +220,6 @@ class HState:
             if h >= threshold:
                 return True, node_id, h
 
-        # 全ノードから最大熱を探す
         max_nid = None
         max_h = 0.0
         for nid, heat in self.node_heats.items():
@@ -221,7 +231,6 @@ class HState:
         if max_nid and max_h >= threshold:
             return True, max_nid, max_h
 
-        # グローバル熱が閾値を超えた場合
         g_h = self.global_heat.total(self.w_pred, self.w_input)
         if g_h >= threshold:
             return True, "__global__", g_h
@@ -229,10 +238,7 @@ class HState:
         return False, max_nid or "", max_h
 
     def apply_remaining_heat_after_leap(self, target_node_id: str, remaining_ratio: float = 0.2):
-        """
-        再編相 M_Δ 後の残存熱処理 (H_remaining)
-        単なる 0 リセットではなく、未解消の不整合比率を残す
-        """
+        """Legacy residual-state handling after an Enterprise reorganization."""
         if target_node_id in self.node_heats:
             self.node_heats[target_node_id].prediction *= remaining_ratio
             self.node_heats[target_node_id].input_err *= remaining_ratio
@@ -245,12 +251,11 @@ class HState:
         canary_version: str,
         heat_ratio: float = 0.5,
     ):
+        """Merge legacy canary heat and Enterprise coverage observations.
+
+        The observation statistics merged here are coverage metrics, not
+        inherited ``xi``.
         """
-        カナリア展開完了 (Full Commit) に伴う残存熱・観測統計の継承 (公理B4: 代謝の連続性)
-        カナリアで新候補自身が経験した微小な不整合 (H_canary) および観測統計 (ξ_canary) を、
-        新本番のベース運用状態へ合流・引き継ぐ。
-        """
-        # 1. カナリア期間中に蓄積されたノード別熱を本番ノード熱にマージ
         keys_to_merge = [k for k in self.versioned_heats.keys() if k[0] == canary_version]
         for (ver, nid) in keys_to_merge:
             c_heat = self.versioned_heats[(ver, nid)]
@@ -259,7 +264,6 @@ class HState:
             self.node_heats[nid].prediction += c_heat.prediction * heat_ratio
             self.node_heats[nid].input_err += c_heat.input_err * heat_ratio
 
-        # 2. カナリア期間中の観測統計 (未分類、欠落、未知、差し戻し) を本番グローバル統計に合流
         if canary_version in self.versioned_observations:
             c_obs = self.versioned_observations[canary_version]
             self.total_tickets += c_obs["total_tickets"]
@@ -268,14 +272,10 @@ class HState:
             self.unknown_input_count += c_obs["unknown_input_count"]
             self.rejection_events_count += c_obs["rejection_events_count"]
 
-        # 3. 隔離バケットのクリーンアップ
         self.clear_version_heat(canary_version)
 
     def version_total_heat(self, mb_version: str) -> float:
-        """
-        指定されたバージョンで蓄積された総熱 (T0 SPEC 4, 6.2: H = ||H_vec||)
-        HStateの統一パラメータ (w_pred, w_input) で算出
-        """
+        """Return legacy total heat for one implementation version."""
         total = 0.0
         for (ver, _), h in self.versioned_heats.items():
             if ver == mb_version:
@@ -283,9 +283,7 @@ class HState:
         return total
 
     def hottest_node_for_version(self, mb_version: str) -> Optional[str]:
-        """
-        指定バージョンの中で最も熱の蓄積が大きいノードIDを返す
-        """
+        """Return the locus with the largest legacy heat for one version."""
         max_nid = None
         max_h = 0.0
         for (ver, nid), h in self.versioned_heats.items():
@@ -298,7 +296,6 @@ class HState:
         if max_nid:
             return max_nid
 
-        # 本番フォールバック: node_heats から探す
         for nid, h in self.node_heats.items():
             if nid and not nid.startswith("__"):
                 h_val = h.total(self.w_pred, self.w_input)
@@ -307,4 +304,3 @@ class HState:
                     max_nid = nid
 
         return max_nid
-
