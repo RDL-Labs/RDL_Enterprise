@@ -7,6 +7,11 @@ from .snapshot import (
     CaseSnapshot,
     CaseStatus,
 )
+from .interaction import (
+    RIBSection,
+    acquire_request_rib_section,
+    acquire_feedback_rib_section,
+)
 from .cascade import InterpCascade
 from .human import HumanQuery
 from .authority import AuthorityContext
@@ -86,6 +91,9 @@ __all__ = [
     "FeedbackResult",
     "CaseSnapshot",
     "CaseStatus",
+    "RIBSection",
+    "acquire_request_rib_section",
+    "acquire_feedback_rib_section",
     "InterpCascade",
     "HumanQuery",
     "AuthorityContext",
