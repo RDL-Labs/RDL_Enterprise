@@ -1,17 +1,17 @@
-"""Explicit v1-to-v2 Active Compiled M_B replacement records."""
+"""Explicit v1-to-v2 Active Function replacement records."""
 
 from dataclasses import dataclass
 from typing import Optional
 
-from .activation_types import ActiveCompiledMB
+from .activation_types import ActiveFunction
 from .contracts import BoundaryContext, Provenance
 from .recompilation_types import CompiledReplacement
 
 
 @dataclass(frozen=True)
 class SupersessionRecord:
-    predecessor: ActiveCompiledMB
-    replacement: ActiveCompiledMB
+    predecessor: ActiveFunction
+    replacement: ActiveFunction
     compiled_replacement: CompiledReplacement
     context: BoundaryContext
     provenance: Optional[Provenance] = None
@@ -22,18 +22,18 @@ class SupersessionRecord:
         if self.compiled_replacement.compiled != self.replacement.artifact:
             raise ValueError("Supersessionのreplacementが一致していません")
         if self.predecessor.artifact == self.replacement.artifact:
-            raise ValueError("Supersessionには異なるCompiledMBが必要です")
+            raise ValueError("Supersessionには異なるcompiled Functionが必要です")
 
 
 def record_supersession(
-    predecessor: ActiveCompiledMB,
-    replacement: ActiveCompiledMB,
+    predecessor: ActiveFunction,
+    replacement: ActiveFunction,
     compiled_replacement: CompiledReplacement,
     context: BoundaryContext,
     *,
     provenance: Optional[Provenance] = None,
 ) -> SupersessionRecord:
-    """Record an explicit Active v1-to-v2 replacement event."""
+    """Record an explicit Active Function v1-to-v2 replacement event."""
     return SupersessionRecord(
         predecessor, replacement, compiled_replacement, context,
         provenance=provenance,
