@@ -1,6 +1,6 @@
 # Interaction Reflection Plan v0.3
 
-Status: **Core v2.3 staged migration: P1–P7 implemented; next mandatory boundary is native Runtime cutover (P8).**  
+Status: **Core v2.3 staged migration: P1–P8 implemented; next mandatory boundary is restart durability of canonical v2.3 state (P9).**  
 Semantic reference: `Aporapeiron/RDL_Core` T0 BASE / SPEC v2.3.  
 Supersedes for current design: `INTERACTION_REFLECTION_PLAN_v0.2.md` (pre-v2.3 / EFP generation).
 
@@ -83,12 +83,13 @@ The canonical bridge path is now:
 
 ```text
 raw BusinessInput
+→ acquisition under B
 → RIBSection(request)
-→ compatibility projection
-→ existing Cascade
+→ existing Cascade through the RIBSection read contract
 → F
 
 FeedbackResult / later observation
+→ acquisition under B
 → RIBSection(subsequent)
 → same frozen pre-update M_B / interpretation context
 → F'
@@ -96,6 +97,8 @@ FeedbackResult / later observation
 → unresolved component only
 → operational H
 ```
+
+Canonical `F / F'` formation no longer depends on `RIBSection.to_business_input()`. That adapter remains only for historical / compatibility surfaces that have not yet been renamed.
 
 On `EnterpriseRuntimeRIBBridge`:
 
@@ -106,13 +109,14 @@ canonical unresolved Δ(F,F')   -> operational H input
 coverage                        -/-> operational θ reduction
 ```
 
-The parent `EnterpriseRuntime` lifecycle is still reused for product behavior, persistence, canary, promotion, and other compatibility mechanisms. Its historical `HState` shape and old names therefore remain compatibility surfaces. They are not the semantic source for the bridge's Core v2.3 H decision.
+The parent `EnterpriseRuntime` lifecycle is still reused for product behavior, persistence, canary, promotion, ledger, snapshot and other compatibility mechanisms. Historical field names therefore remain in some internals, but they no longer define the canonical interpretation input on the RIB bridge.
 
 This distinction is important:
 
 ```text
-v2.3 bridge operational cutover = implemented
-native RIBSection Runtime        = not yet implemented
+native RIBSection interpretation for F/F' = implemented
+all historical Runtime names removed       = not required for P8
+canonical restart durability               = P9 inspection target
 ```
 
 ---
@@ -154,9 +158,9 @@ No conflict score, priority score, coverage score, or human-attention score is a
 | **P4** | Separate H and coverage | **DONE** — unresolved mismatch and coverage state are separate |
 | **P5** | Cut legacy `e_input → H` | **DONE on RIB bridge** — `e_input` remains observable but cannot drive operational H / M_Δ |
 | **P6** | Remove observable-ξ semantics | **DONE for current migration API** — `coverage_gap_score` is canonical; `xi_obs` is deprecated compatibility alias only |
-| **P7** | Function artifact migration | **DONE for public Core API** — `CompiledFunction / ActiveFunction / ConditionalCompiledFunction` and canonical conditional lifecycle are available; `*CompiledMB` remains compatibility-only |
-| **P8** | Runtime cutover | **OPEN** — remove the compatibility projection as the semantic execution dependency and let product Runtime consume RIB sections natively |
-| **P9** | Persistence / restart durability | **OPEN** — canonical RIB sections and v2.3 mismatch state must survive process restart as first-class persisted state |
+| **P7** | Function artifact migration | **DONE for public Core API** — canonical Function artifacts and conditional lifecycle are available; `*CompiledMB` remains compatibility-only |
+| **P8** | Runtime cutover | **DONE on RIB bridge** — both initial `F` and canonical `F'` consume `RIBSection` directly; tests fail if `to_business_input()` is required by the canonical path |
+| **P9** | Persistence / restart durability | **IN PROGRESS** — `RIBSection` is pickle/restart-safe and a pending request can be restored and continued into a later section; full canonical mismatch/coverage/H restart contract remains to be pinned |
 | **P10** | Real interaction acceptance | **PARTIAL / OPEN** — real-provider observations exist, but one complete structural-conflict → response → changed conditions → later RIB_B → F/F' → E chain remains to be observed end-to-end |
 
 Completion here means only that the declared migration contract is implemented and covered by the current finite test boundary. It does not imply universal correctness or completeness.
@@ -231,7 +235,7 @@ The canonical bridge timeout path records coverage / operational information wit
 
 Meaning-affecting time is an explicit finite condition.
 
-`EnterpriseRuntime.dispatch_ticket()` now binds an explicit `BusinessInput.created_at` to `FrozenInterpretationContext.constraint_evaluation_time` when available. This prevents constraint freshness from silently depending on wall clock during deterministic Simulation / replay.
+`EnterpriseRuntime.dispatch_ticket()` binds an explicit request observation time to `FrozenInterpretationContext.constraint_evaluation_time` when available. Because the RIB bridge now passes `RIBSection` directly, its `created_at` read contract exposes the acquired observation time without reintroducing wall clock.
 
 ```text
 observation time
@@ -239,7 +243,7 @@ observation time
 → F / F' comparison boundary
 ```
 
-If no explicit observation time is supplied, the compatibility fallback may still use current time. The fallback is not treated as equivalent to a fixed replay condition.
+Compatibility surfaces may still have wall-clock fallbacks when no observation time exists. Such fallback is not treated as equivalent to a fixed replay condition.
 
 ---
 
@@ -248,6 +252,8 @@ If no explicit observation time is supplied, the compatibility fallback may stil
 Synthetic cases remain synthetic. Development-authored priority labels, factor tables, expected outcomes, and benchmark fixtures are bounded hypotheses / test references, not collected operator truth.
 
 A deterministic replay or green test establishes only that no contract violation was observed inside the declared finite test Boundary.
+
+The P8 cutover acceptance run at commit `36cd67aba105d4f2120b1ee8ac473c1b6a9c4377` completed with `312 passed, 4 skipped, 6 subtests passed`. This is bounded regression evidence, not a proof of RDL or universal Runtime correctness.
 
 ```text
 bounded acceptance
@@ -264,14 +270,25 @@ Do not add new semantic primitives merely because the v2.3 vocabulary permits mo
 
 Add or promote a new type only when it is necessary to prevent a direct BASE / SPEC v2.3 violation, recover missing Boundary or Provenance, distinguish currently collapsed roles, inspect an observed operational break, or preserve an already demonstrated invariant during migration.
 
-The next mandatory break is now:
+P8 removed this semantic dependency:
 
 ```text
 RIBSection
    ↓
-compatibility projection to BusinessInput / inherited Runtime
+to_business_input()
    ↓
-product lifecycle
+F / F'
 ```
 
-P8 should remove this projection as the semantic execution dependency while preserving the already demonstrated Authority, persistence, canary, staged commitment, frozen-`M_B`, provenance, and deterministic replay contracts.
+The next mandatory break is P9:
+
+```text
+canonical request RIBSection
++ frozen interpretation boundary
++ subsequent RIBSection
++ canonical mismatch / unresolved-H state
+        ↓ persist / restart
+recover the same finite roles and lineage
+```
+
+The next work should pin exactly which canonical v2.3 states must survive restart, without treating persistence as Truth or claiming complete system state.
