@@ -1,14 +1,19 @@
 """Two-phase P10 live acceptance harness for RDL Enterprise.
 
-This command does not mutate Jira.  It records a real provider observation as
+This command does not mutate Jira. It records a real provider observation as
 the before-state, persists the pending canonical RIB boundary, then allows an
-authorized external action/change to occur.  A later invocation restores the
+authorized external action/change to occur. A later invocation restores the
 same Runtime boundary, obtains a second real observation, and evaluates the
 canonical RIB -> F/F' -> E chain.
 
-P10 closure requires an explicit external action reference and an observed
-canonical mismatch.  The action reference is provenance supplied by the
-operator; the harness does not claim causal proof beyond that bounded record.
+P10 closure requires all of the following:
+
+- an explicit durable external action reference;
+- a real provider observation that differs from the stored before observation;
+- a canonical non-zero Delta(F, F').
+
+The action reference is bounded provenance supplied by the operator. The
+harness does not claim causal proof beyond that finite record.
 """
 
 from __future__ import annotations
@@ -71,6 +76,31 @@ def _provenance_dict(value: Optional[Any]) -> Optional[Dict[str, Any]]:
     return asdict(value) if value is not None else None
 
 
+def _evidence_path(store_path: str) -> Path:
+    return Path(f"{store_path}.p10-before.json")
+
+
+def _write_before_evidence(store_path: str, evidence: Dict[str, Any]) -> None:
+    path = _evidence_path(store_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _read_before_evidence(store_path: str) -> Dict[str, Any]:
+    path = _evidence_path(store_path)
+    if not path.exists():
+        raise SystemExit(
+            f"missing P10 before evidence: {path}; run --phase before first"
+        )
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise SystemExit("invalid P10 before evidence record")
+    return value
+
+
 def phase_before(store_path: str, issue_key: str) -> Dict[str, Any]:
     connector = _connector()
     observation = connector.lookup({"case_id": issue_key})
@@ -97,11 +127,21 @@ def phase_before(store_path: str, issue_key: str) -> Dict[str, Any]:
     if not isinstance(snapshot.rib_section, RIBSection):
         raise RuntimeError("canonical request RIBSection was not established")
 
+    evidence = {
+        "issue_key": issue_key,
+        "ticket_id": ticket_id,
+        "provider_observation": observation,
+        "request_boundary_id": snapshot.rib_section.boundary_id,
+        "request_provenance": _provenance_dict(snapshot.rib_section.provenance),
+    }
+    _write_before_evidence(store_path, evidence)
+
     report = {
         "phase": "before",
         "issue_key": issue_key,
         "ticket_id": ticket_id,
         "store_path": str(Path(store_path).resolve()),
+        "evidence_path": str(_evidence_path(store_path).resolve()),
         "request_boundary_id": snapshot.rib_section.boundary_id,
         "request_provenance": _provenance_dict(snapshot.rib_section.provenance),
         "initial_f_content": getattr(snapshot.f_pred, "content", None),
@@ -125,6 +165,10 @@ def phase_after(
     if not action_reference.strip():
         raise SystemExit("--action-reference is required for the after phase")
 
+    before = _read_before_evidence(store_path)
+    if before.get("issue_key") != issue_key:
+        raise SystemExit("P10 before evidence targets a different issue")
+
     connector = _connector()
     runtime = EnterpriseRuntimeRIBBridge(store_path=store_path, theta_0=10.0)
     ticket_id = _ticket_id(issue_key)
@@ -134,6 +178,9 @@ def phase_after(
         )
 
     later = connector.lookup({"case_id": issue_key})
+    before_observation = before.get("provider_observation")
+    provider_changed = _json(before_observation) != _json(later)
+
     feedback = FeedbackResult(
         user_resolved=False,
         actual_response_text=_json(later),
@@ -162,12 +209,18 @@ def phase_after(
         raise RuntimeError("canonical F' / E was not established")
 
     mismatch = float(snapshot.v23_mismatch.value)
-    changed = mismatch > 0.0
-    accepted = bool(action_reference.strip()) and changed
-    if require_change and not changed:
+    canonical_changed = mismatch > 0.0
+    accepted = bool(action_reference.strip()) and provider_changed and canonical_changed
+
+    if require_change and not provider_changed:
         raise SystemExit(
-            "real later observation was acquired, but canonical E is zero; "
+            "later live provider observation is identical to the stored before observation; "
             "P10 changed-condition gate remains open"
+        )
+    if require_change and not canonical_changed:
+        raise SystemExit(
+            "provider state changed, but canonical E is zero; the current finite interpretation "
+            "did not recover that change, so P10 remains open"
         )
 
     report = {
@@ -179,17 +232,19 @@ def phase_after(
         "later_boundary_id": snapshot.rib_section_next.boundary_id,
         "request_provenance": _provenance_dict(snapshot.efp.provenance),
         "later_provenance": _provenance_dict(snapshot.rib_section_next.provenance),
+        "provider_state_changed": provider_changed,
+        "before_provider_observation": before_observation,
+        "later_provider_observation": later,
         "canonical_e_status": snapshot.v23_core_e_status,
         "canonical_e": mismatch,
         "canonical_e_reasons": list(snapshot.v23_mismatch.reasons),
+        "canonical_change_observed": canonical_changed,
         "operational_h": float(resolved.v23_operational_h),
         "operational_theta": float(resolved.v23_operational_theta),
-        "changed_condition_observed": changed,
         "p10_bounded_acceptance": accepted,
-        "later_provider_observation": later,
         "caveat": (
-            "action_reference plus changed provider observation is bounded provenance evidence; "
-            "it is not universal causal proof"
+            "action reference + provider before/after change + canonical E are bounded evidence; "
+            "they do not constitute universal causal proof"
         ),
     }
     return report
@@ -207,7 +262,7 @@ def main() -> None:
     parser.add_argument(
         "--allow-unchanged",
         action="store_true",
-        help="record a real later observation even when canonical E is zero; does not close P10",
+        help="record a later real observation without closing P10 when provider/canonical state is unchanged",
     )
     args = parser.parse_args()
 
