@@ -56,6 +56,7 @@ from .runtime import (
     TicketResolutionResult,
     ReorganizationProposal,
 )
+from .runtime_rib_bridge import EnterpriseRuntimeRIBBridge
 from .persistence import SQLiteCaseStore
 from .service import EnterpriseService, AuthenticationError, AuthorizationError
 from .tool_execution import ToolSpec, ToolRegistry, ToolExecutionResult, ReconciliationResult, ExecutionUncertain, execute_tool, reconcile_tool_execution
@@ -122,6 +123,7 @@ __all__ = [
     "ActionLedger",
     "CompensationExecutor",
     "EnterpriseRuntime",
+    "EnterpriseRuntimeRIBBridge",
     "TicketExecutionResult",
     "TicketDispatchResult",
     "TicketResolutionResult",
