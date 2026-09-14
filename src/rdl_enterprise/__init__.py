@@ -1,5 +1,6 @@
 from .mb_graph import MBNode, MBGraph
 from .h_state import HState, HeatVector
+from .operational_h import V23OperationalHStateAdapter
 from .mismatch_state import (
     InterpretationMismatchObservation,
     compare_interpretation_states,
@@ -95,6 +96,7 @@ __all__ = [
     "MBGraph",
     "HState",
     "HeatVector",
+    "V23OperationalHStateAdapter",
     "InterpretationMismatchObservation",
     "compare_interpretation_states",
     "MismatchBucket",
