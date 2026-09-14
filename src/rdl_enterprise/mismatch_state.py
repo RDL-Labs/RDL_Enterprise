@@ -16,7 +16,58 @@ observation metrics are explicit Enterprise-local observations.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
+
+
+@dataclass(frozen=True)
+class InterpretationMismatchObservation:
+    """One bounded Enterprise observation of ``Delta(F, F')``.
+
+    The weighting below is an Enterprise comparison policy, not a Core
+    definition of distance.  Core fixes the role of ``E`` as a mismatch
+    between the two interpreted states; the concrete ``Delta`` may be replaced
+    for another Boundary / application.
+    """
+
+    value: float
+    reasons: Tuple[str, ...] = ()
+
+
+def compare_interpretation_states(current: Any, subsequent: Any) -> InterpretationMismatchObservation:
+    """Compare two interpretation records using the current Enterprise delta.
+
+    Both records are expected to have been formed by the same pre-update
+    ``M_B`` and frozen interpretation conditions.  This function does not
+    inspect raw input completeness, timeout, queue load, or ``xi``.
+    """
+
+    value = 0.0
+    reasons = []
+
+    if getattr(subsequent, "matched_node_id", None) != getattr(current, "matched_node_id", None):
+        value += 0.5
+        reasons.append("matched_node_changed")
+
+    if getattr(subsequent, "action_type", None) != getattr(current, "action_type", None):
+        value += 0.4
+        reasons.append("action_type_changed")
+
+    if getattr(subsequent, "expected_outcome", None) != getattr(current, "expected_outcome", None):
+        value += 0.4
+        reasons.append("expected_outcome_changed")
+
+    current_confidence = float(getattr(current, "confidence", 0.0))
+    subsequent_confidence = float(getattr(subsequent, "confidence", current_confidence))
+    confidence_gap = abs(current_confidence - subsequent_confidence)
+    if confidence_gap > 1e-4:
+        value += 0.4 * confidence_gap
+        reasons.append(f"confidence_gap:{confidence_gap:.4f}")
+
+    if getattr(subsequent, "content", None) != getattr(current, "content", None):
+        value += 0.2
+        reasons.append("content_changed")
+
+    return InterpretationMismatchObservation(round(value, 4), tuple(reasons))
 
 
 @dataclass
