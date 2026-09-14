@@ -1,5 +1,11 @@
 from .mb_graph import MBNode, MBGraph
 from .h_state import HState, HeatVector
+from .mismatch_state import (
+    MismatchBucket,
+    UnresolvedMismatchState,
+    ObservationCoverageState,
+    CoverageAdjustedThresholdPolicy,
+)
 from .snapshot import (
     BusinessInput,
     InterpretationPrediction,
@@ -87,6 +93,10 @@ __all__ = [
     "MBGraph",
     "HState",
     "HeatVector",
+    "MismatchBucket",
+    "UnresolvedMismatchState",
+    "ObservationCoverageState",
+    "CoverageAdjustedThresholdPolicy",
     "BusinessInput",
     "InterpretationPrediction",
     "FeedbackResult",
