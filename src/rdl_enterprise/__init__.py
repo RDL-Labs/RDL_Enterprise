@@ -1,6 +1,8 @@
 from .mb_graph import MBNode, MBGraph
 from .h_state import HState, HeatVector
 from .mismatch_state import (
+    InterpretationMismatchObservation,
+    compare_interpretation_states,
     MismatchBucket,
     UnresolvedMismatchState,
     ObservationCoverageState,
@@ -62,7 +64,7 @@ from .runtime import (
     TicketResolutionResult,
     ReorganizationProposal,
 )
-from .runtime_rib_bridge import EnterpriseRuntimeRIBBridge
+from .runtime_rib_bridge import EnterpriseRuntimeRIBBridge, V23TimeoutResolution
 from .persistence import SQLiteCaseStore
 from .service import EnterpriseService, AuthenticationError, AuthorizationError
 from .tool_execution import ToolSpec, ToolRegistry, ToolExecutionResult, ReconciliationResult, ExecutionUncertain, execute_tool, reconcile_tool_execution
@@ -93,6 +95,8 @@ __all__ = [
     "MBGraph",
     "HState",
     "HeatVector",
+    "InterpretationMismatchObservation",
+    "compare_interpretation_states",
     "MismatchBucket",
     "UnresolvedMismatchState",
     "ObservationCoverageState",
@@ -134,6 +138,7 @@ __all__ = [
     "CompensationExecutor",
     "EnterpriseRuntime",
     "EnterpriseRuntimeRIBBridge",
+    "V23TimeoutResolution",
     "TicketExecutionResult",
     "TicketDispatchResult",
     "TicketResolutionResult",
