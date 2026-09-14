@@ -19,6 +19,7 @@ and RIB_B are identical.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Tuple
 
@@ -107,12 +108,11 @@ class RIBSection:
             category=self.category,
             query_text=self.projection_text,
             metadata=metadata,
-            created_at=self.context.observation_time or self.payload.get("created_at") or BusinessInput(
-                ticket_id="_timestamp_probe",
-                user_id="_",
-                category=None,
-                query_text="",
-            ).created_at,
+            created_at=(
+                self.context.observation_time
+                or self.payload.get("created_at")
+                or datetime.utcnow().isoformat()
+            ),
         )
 
 
