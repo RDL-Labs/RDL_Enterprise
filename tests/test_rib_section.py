@@ -1,3 +1,5 @@
+import pickle
+
 from rdl_core import BoundaryContext
 from rdl_enterprise import (
     BusinessInput,
@@ -58,7 +60,7 @@ def test_feedback_acquisition_forms_subsequent_section_without_declaring_e_or_xi
     assert section.payload["feedback_comment"] == "Still blocked after the response"
     assert "【後続観測】未解決" in section.projection_text
     assert "【後続状態】Service remains blocked" in section.projection_text
-    # RIBSection is still an uninterpreted finite section.  The acquisition
+    # RIBSection is still an uninterpreted finite section. The acquisition
     # contract itself contains no Core E/H/xi state.
     assert not any(name in section.payload for name in ("E", "H", "xi", "ξ"))
 
@@ -77,3 +79,38 @@ def test_acquisition_accepts_explicit_boundary_context():
     assert section.context is context
     assert section.boundary_id == "audit-boundary"
     assert section.context.conditions["scope"] == "security"
+
+
+def test_rib_section_pickle_round_trip_restores_frozen_boundary_and_payload():
+    raw = BusinessInput(
+        "RIB-PERSIST-1",
+        "operator-4",
+        "workflow",
+        "Persist this finite section",
+        metadata={"interaction_series_id": "series-persist"},
+        created_at="2026-09-14T11:00:00+00:00",
+    )
+    context = BoundaryContext(
+        boundary_id="persist-boundary",
+        question="restart durability",
+        observation_time=raw.created_at,
+        purpose="persistence_test",
+        conditions={"scope": "workflow", "nested": {"mode": "finite"}},
+    )
+    section = acquire_request_rib_section(raw, context=context)
+
+    restored = pickle.loads(pickle.dumps(section))
+
+    assert isinstance(restored, RIBSection)
+    assert restored is not section
+    assert restored.section_id == section.section_id
+    assert restored.section_role == section.section_role
+    assert restored.query_text == section.query_text
+    assert restored.created_at == section.created_at
+    assert restored.payload == section.payload
+    assert restored.context.boundary_id == section.context.boundary_id
+    assert restored.context.purpose == section.context.purpose
+    assert restored.context.conditions["scope"] == "workflow"
+    assert restored.context.conditions["nested"]["mode"] == "finite"
+    # Detached metadata remains derived from the restored finite section.
+    assert restored.metadata["interaction_series_id"] == "series-persist"
