@@ -8,16 +8,20 @@ Current canonical path:
     raw BusinessInput
       -> acquire_request_rib_section(...)
       -> RIBSection (Enterprise RIB_B representation)
-      -> compatibility projection for the existing Cascade
+      -> compatibility projection for inherited dispatch lifecycle
       -> F
 
     later raw feedback / observation
       -> acquire_feedback_rib_section(...)
       -> later RIBSection
-      -> same frozen pre-update M_B / interpretation context
+      -> direct interpretation by the same frozen pre-update M_B/context
       -> F'
       -> bounded Delta(F, F')
       -> unresolved component only -> operational H
+
+The subsequent canonical interpretation no longer projects ``RIBSection`` back
+to ``BusinessInput``. The initial dispatch lifecycle still uses a compatibility
+projection and is the remaining P8 cutover boundary.
 
 Coverage, missing information, unknown routing and rejection observations remain
 separate Enterprise-local measurements. They do not quantify Core ``xi`` and
@@ -71,7 +75,7 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
     parent snapshot path; it is not added to H.
     """
 
-    migration_stage = "P1_P5_RIB_OPERATIONAL_H_CUTOVER"
+    migration_stage = "P8_SUBSEQUENT_RIB_DIRECT_INTERPRETATION"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -113,6 +117,9 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         else:
             raise TypeError("request must be BusinessInput or RIBSection")
 
+        # Remaining P8 compatibility boundary: the inherited dispatch lifecycle
+        # still persists and routes BusinessInput. Canonical section acquisition
+        # remains independently recoverable on the snapshot.
         compatibility_input = rib_section.to_business_input()
         result = super().dispatch_ticket(
             compatibility_input,
@@ -125,7 +132,7 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         # canonical acquired interaction section is retained independently.
         snapshot.raw_business_input = raw_request
         snapshot.rib_section = rib_section
-        snapshot.interaction_semantic_version = "core-v2.3-rib-operational-h"
+        snapshot.interaction_semantic_version = "core-v2.3-rib-p8-subsequent-direct"
         return result
 
     def resolve_ticket_feedback(
@@ -152,15 +159,14 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         rib_section_next = acquire_feedback_rib_section(raw_request, feedback)
         snapshot.rib_section_next = rib_section_next
 
-        # Canonical comparison: the acquired later section is interpreted by
-        # the same frozen pre-update M_B and interpretation conditions.
+        # Canonical comparison: interpret the acquired later RIB section itself,
+        # not a reconstructed BusinessInput projection. The same frozen
+        # pre-update M_B and interpretation conditions are reused.
         v23_f_prime = None
         v23_mismatch = None
         frozen_context = getattr(snapshot, "frozen_context", None)
         if frozen_context is not None:
-            v23_f_prime = frozen_context.interpret_efp(
-                rib_section_next.to_business_input()
-            )
+            v23_f_prime = frozen_context.interpret_efp(rib_section_next)
             if v23_f_prime is not None:
                 v23_mismatch = compare_interpretation_states(
                     snapshot.f_pred,
@@ -170,7 +176,7 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         snapshot.v23_mismatch = v23_mismatch
         snapshot.v23_core_e_status = "OBSERVED" if v23_mismatch is not None else "NOT_EVALUATED"
 
-        # Parent resolution still performs product lifecycle work.  Its call to
+        # Parent resolution still performs product lifecycle work. Its call to
         # ``self._finalize_case_metabolism`` dispatches to the override below,
         # where legacy E/input/C_prime heat is replaced by canonical v2.3 roles.
         result = super().resolve_ticket_feedback(
@@ -191,7 +197,7 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
             resolved.rib_section_next = rib_section_next
             resolved.v23_f_prime = v23_f_prime
             resolved.v23_mismatch = v23_mismatch
-            resolved.interaction_semantic_version = "core-v2.3-rib-operational-h"
+            resolved.interaction_semantic_version = "core-v2.3-rib-p8-subsequent-direct"
 
             pred = resolved.f_pred
             mb_version = getattr(
@@ -247,7 +253,7 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         """Cut operational H over to the canonical v2.3 mismatch path.
 
         The parent Runtime still supplies legacy ``e_pred``, ``e_input`` and a
-        legacy C_prime-derived ``opposing_strength``.  None of those values is
+        legacy C_prime-derived ``opposing_strength``. None of those values is
         allowed to directly drive H on this bridge.
 
         Operational retention rule:
@@ -352,7 +358,7 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
             snapshot.v23_f_prime = None
             snapshot.v23_mismatch = None
             snapshot.v23_core_e_status = "NOT_EVALUATED"
-            snapshot.interaction_semantic_version = "core-v2.3-rib-operational-h"
+            snapshot.interaction_semantic_version = "core-v2.3-rib-p8-subsequent-direct"
 
             pred = snapshot.f_pred
             self.v23_coverage.record(
