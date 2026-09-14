@@ -63,6 +63,12 @@ FunctionCandidate
 
 CompilationRecord
   = finite validation observation
+
+CompiledFunction
+  = validated versioned Function artifact
+
+ActiveFunction
+  = explicitly promoted and registered Function artifact
 ```
 
 これらは `M_B` の同義語ではない。
@@ -71,7 +77,7 @@ CompilationRecord
 
 ## 2. `CompiledMB` という型名の身分
 
-現在のコードには、後方互換上、次の型名が残る。
+現在のコードには、後方互換上、次の旧型名が残る。
 
 ```text
 CompiledMB
@@ -81,15 +87,26 @@ ActiveCompiledMB
 
 移行期間中、これらは**legacy compatibility names**として扱う。
 
-意味上は、たとえば `CompiledMB` を、
+通常Function lifecycleでは、正規型としてすでに、
 
 ```text
-Validated Compiled Function Artifact
+CompiledFunction
+ActiveFunction
 ```
 
-として読む。
+を導入している。
 
-つまり、
+`CompiledFunction` は、
+
+```text
+FunctionDescription
++ finite StructureCandidate
++ PASSED CompilationRecord
+```
+
+を保持する。これは `M_B` そのものではない。
+
+旧 `CompiledMB` は同じ有限内容から `CompiledFunction` へ明示変換でき、旧 `ActiveCompiledMB` は現在 `ActiveFunction` への互換aliasとして残している。
 
 ```text
 CompiledMB.class-name
@@ -98,17 +115,7 @@ CompiledMB.class-name
 
 である。
 
-将来的には、互換性を維持しながら、
-
-```text
-CompiledFunction
-ConditionalCompiledFunction
-ActiveFunction
-```
-
-等の正規名称へ移行する。
-
-旧名称は、新規設計の根拠として使わない。
+`ConditionalCompiledMB` 系は次段の移行対象であり、新規設計の根拠として旧名称を使わない。
 
 ---
 
@@ -158,11 +165,11 @@ structure candidate
         ↓
 Function Candidate
         ↓ validation / rupture / durability
-Compiled Function Artifact
+CompiledFunction
         ↓ promotion
 Promoted Function Artifact
         ↓ explicit activation
-Active Function
+ActiveFunction
 ```
 
 各段階は、
@@ -174,6 +181,8 @@ Candidate != Validated != Promoted != Active
 である。
 
 コンパイル済みであることはTruth、Authority、Commitment、世界全体への妥当性を意味しない。
+
+Recompilation / Supersessionも現行コードでは正規 `CompiledFunction` / `ActiveFunction` を生成・保持する方向へ移行している。旧 `CompiledMB` を入力として受ける互換経路は当面維持する。
 
 ---
 
@@ -265,7 +274,7 @@ Persistent M_B : 長期に再利用される構造候補・保持構造
 一方、
 
 ```text
-Compiled Function
+CompiledFunction
 ```
 
 は**演算成果物のlifecycle分類**であり、M_Bの時間スケール分類ではない。
@@ -318,7 +327,10 @@ Function
 CompiledFunction
 = validated Function artifact
 
+ActiveFunction
+= explicitly activated compiled Function
+
 Function != M_B
 ```
 
-Enterpriseの旧 `CompiledMB` 型は、現時点ではこの `CompiledFunction` の**互換実装名**として扱う。
+Enterpriseの旧 `CompiledMB` / `ActiveCompiledMB` は、現時点ではこのFunction lifecycleの**互換名称**として扱う。
