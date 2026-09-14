@@ -127,6 +127,7 @@ from .compiled_function_types import (
     CompiledFunctionArtifact,
     as_compiled_function,
 )
+from .conditional_compiled_function_types import ConditionalCompiledFunction
 from .rupture_types import RuptureObservation, RuptureObservationStatus, record_rupture_observation
 from .promotion_types import PromotionDecision, PromotionDecisionStatus, PromotionPolicyDescription, evaluate_promotion
 from .activation_types import ActiveFunction, ActiveCompiledMB, activate_promoted_artifact
@@ -315,6 +316,7 @@ __all__ = [
     "compile_lineage_preserving_conditional_candidate",
     "ConditionalCompilationRecord",
     "ConditionalCompilationEvaluation",
+    "ConditionalCompiledFunction",
     "ConditionalCompiledMB",
     "ConditionalPromotionRecord",
     "ConditionalActivationRecord",
