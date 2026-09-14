@@ -13,12 +13,15 @@ Current staged path:
       -> compatibility BusinessInput
       -> legacy EnterpriseRuntime / InterpCascade
 
-Later feedback is also acquired as a canonical subsequent RIBSection and
-attached to the case before/after the legacy feedback metabolism runs.
+Later feedback is acquired as a canonical subsequent RIBSection.  The bridge
+also forms a shadow ``F'`` from that section with the same frozen pre-update
+interpretation context and records a v2.3-style ``Delta(F, F')`` separately
+from the legacy metabolism.
 
 Important: the inherited legacy metabolism still contains pre-v2.3 semantics
-(`e_input` heat and observable-xi threshold policy).  Consumers must not treat
-this bridge as completion of the migration until those stages are replaced.
+(`e_input` heat and observable-xi threshold policy).  The new mismatch / H /
+coverage states are shadow migration evidence until the legacy path is cut
+over.  Consumers must not treat this bridge as completion of the migration.
 """
 
 from __future__ import annotations
@@ -27,6 +30,11 @@ from typing import Any, Dict, Optional, Union
 
 from .authority import AuthorityContext
 from .interaction import RIBSection, acquire_feedback_rib_section, acquire_request_rib_section
+from .mismatch_state import (
+    ObservationCoverageState,
+    UnresolvedMismatchState,
+    compare_interpretation_states,
+)
 from .runtime import EnterpriseRuntime, TicketDispatchResult, TicketResolutionResult
 from .snapshot import BusinessInput, FeedbackResult
 
@@ -39,7 +47,15 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
     and explicit acquisition pipelines.
     """
 
-    migration_stage = "P1_P2_RIB_ACQUISITION_BRIDGE"
+    migration_stage = "P1_P3_RIB_AND_MISMATCH_SHADOW"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Shadow state: this does not replace legacy self.h_state yet.
+        theta = float(getattr(self.h_state, "theta_0", 2.0))
+        gamma = float(getattr(self.h_state, "gamma", 0.05))
+        self.v23_h_state = UnresolvedMismatchState(theta=theta, gamma=gamma)
+        self.v23_coverage = ObservationCoverageState()
 
     def dispatch_ticket(
         self,
@@ -64,11 +80,11 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         )
 
         snapshot = self.pending_snapshots[result.ticket_id]
-        # These fields are deliberately additive.  Existing ``efp`` remains a
+        # These fields are deliberately additive. Existing ``efp`` remains a
         # compatibility field until Snapshot/Persistence migration is complete.
         snapshot.raw_business_input = raw_request
         snapshot.rib_section = rib_section
-        snapshot.interaction_semantic_version = "core-v2.3-rib-bridge"
+        snapshot.interaction_semantic_version = "core-v2.3-rib-shadow"
         return result
 
     def resolve_ticket_feedback(
@@ -95,9 +111,24 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         snapshot = self.pending_snapshots[ticket_id]
         raw_request = getattr(snapshot, "raw_business_input", snapshot.efp)
         rib_section_next = acquire_feedback_rib_section(raw_request, feedback)
-        # Attach before the legacy call so persistence of a pending snapshot can
-        # retain acquisition provenance if later code adds an intermediate save.
         snapshot.rib_section_next = rib_section_next
+
+        # Canonical shadow comparison: interpret the acquired subsequent
+        # section, not FeedbackResult itself, through the frozen pre-update M_B.
+        v23_f_prime = None
+        v23_mismatch = None
+        frozen_context = getattr(snapshot, "frozen_context", None)
+        if frozen_context is not None:
+            v23_f_prime = frozen_context.interpret_efp(
+                rib_section_next.to_business_input()
+            )
+            if v23_f_prime is not None:
+                v23_mismatch = compare_interpretation_states(
+                    snapshot.f_pred,
+                    v23_f_prime,
+                )
+        snapshot.v23_f_prime = v23_f_prime
+        snapshot.v23_mismatch = v23_mismatch
 
         result = super().resolve_ticket_feedback(
             ticket_id,
@@ -108,8 +139,6 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
             authority=authority,
         )
 
-        # The same snapshot object is moved to resolved_snapshots by the legacy
-        # Runtime.  Keep canonical section identity recoverable there as well.
         resolved = next(
             (item for item in reversed(self.resolved_snapshots)
              if getattr(getattr(item, "efp", None), "ticket_id", None) == ticket_id),
@@ -117,5 +146,46 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         )
         if resolved is not None:
             resolved.rib_section_next = rib_section_next
-            resolved.interaction_semantic_version = "core-v2.3-rib-bridge"
+            resolved.v23_f_prime = v23_f_prime
+            resolved.v23_mismatch = v23_mismatch
+            resolved.interaction_semantic_version = "core-v2.3-rib-shadow"
+
+            # Coverage observations remain outside Core H and outside xi.
+            pred = resolved.f_pred
+            self.v23_coverage.record(
+                unclassified=(pred.matched_node_id is None),
+                missing_info=False,
+                unknown_route=(pred.matched_node_id is None and pred.cost_tier == 3),
+                rejected=bool(feedback.human_rejected),
+                mb_version=getattr(
+                    getattr(getattr(resolved, "frozen_context", None), "frozen_mb", None),
+                    "version",
+                    "prod",
+                ),
+                is_canary=bool(getattr(resolved, "is_canary", False)),
+            )
+
+            # Enterprise shadow retention policy: only a mismatch that remains
+            # unresolved by the later observation contributes to the v2.3 H
+            # candidate. Resolution status is not used to rewrite F'; it is a
+            # separate operational retention decision.
+            if (
+                v23_mismatch is not None
+                and v23_mismatch.value > 0.0
+                and (not feedback.user_resolved or feedback.human_rejected)
+            ):
+                self.v23_h_state.add_unresolved_mismatch(
+                    pred.matched_node_id,
+                    v23_mismatch.value,
+                    mb_version=getattr(
+                        getattr(getattr(resolved, "frozen_context", None), "frozen_mb", None),
+                        "version",
+                        "prod",
+                    ),
+                    is_canary=bool(getattr(resolved, "is_canary", False)),
+                )
+
+            resolved.v23_h_total = self.v23_h_state.global_mismatch.total()
+            resolved.v23_coverage_gap_score = self.v23_coverage.coverage_gap_score()
+
         return result
