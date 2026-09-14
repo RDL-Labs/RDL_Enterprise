@@ -1,26 +1,27 @@
 """Staged Runtime bridge from raw Enterprise events to Core v2.3 RIB_B roles.
 
-This is a migration surface, not a claim that the legacy Enterprise Runtime is
-already fully Core v2.3 compliant. It moves the request/subsequent-observation
-boundary first while the legacy Cascade and metabolism implementation remain
-available behind compatibility projections.
+This migration surface keeps the product lifecycle of ``EnterpriseRuntime``
+while replacing the semantic path in bounded stages.
 
-Current staged path:
+Current canonical path:
 
     raw BusinessInput
       -> acquire_request_rib_section(...)
-      -> RIBSection
-      -> compatibility BusinessInput
-      -> legacy EnterpriseRuntime / InterpCascade
+      -> RIBSection (Enterprise RIB_B representation)
+      -> compatibility projection for the existing Cascade
+      -> F
 
-Later feedback is acquired as a canonical subsequent RIBSection. The bridge
-also forms a shadow ``F'`` from that section with the same frozen pre-update
-interpretation context and records a v2.3-style ``Delta(F, F')`` separately
-from the legacy metabolism.
+    later raw feedback / observation
+      -> acquire_feedback_rib_section(...)
+      -> later RIBSection
+      -> same frozen pre-update M_B / interpretation context
+      -> F'
+      -> bounded Delta(F, F')
+      -> unresolved component only -> operational H
 
-Important: the inherited legacy metabolism still contains pre-v2.3 semantics
-(`e_input` heat and observable-xi compatibility policy). The new mismatch / H /
-coverage states are migration evidence until the legacy path is cut over.
+Coverage, missing information, unknown routing and rejection observations remain
+separate Enterprise-local measurements. They do not quantify Core ``xi`` and
+do not lower the operational reconstruction threshold on this bridge.
 """
 
 from __future__ import annotations
@@ -36,8 +37,15 @@ from .mismatch_state import (
     UnresolvedMismatchState,
     compare_interpretation_states,
 )
+from .operational_h import V23OperationalHStateAdapter
 from .runtime import EnterpriseRuntime, TicketDispatchResult, TicketResolutionResult
-from .snapshot import BusinessInput, FeedbackResult, CaseStatus, OutcomeObservation
+from .snapshot import (
+    BusinessInput,
+    CaseSnapshot,
+    FeedbackResult,
+    CaseStatus,
+    OutcomeObservation,
+)
 
 
 @dataclass(frozen=True)
@@ -55,20 +63,38 @@ class V23TimeoutResolution:
 
 
 class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
-    """Compatibility Runtime that makes the RIB_B acquisition boundary real.
+    """Compatibility Runtime with a real RIB_B boundary and v2.3 H cutover.
 
-    The public request API continues to accept ``BusinessInput`` for product
-    compatibility. A pre-built ``RIBSection`` may also be supplied for tests
-    and explicit acquisition pipelines.
+    Public request compatibility is retained, but operational H / M_delta on
+    this bridge is driven only by unresolved canonical ``Delta(F, F')``.
+    ``e_input`` remains available as a legacy diagnostic value returned by the
+    parent snapshot path; it is not added to H.
     """
 
-    migration_stage = "P1_P4_RIB_MISMATCH_TIMEOUT_SHADOW"
+    migration_stage = "P1_P5_RIB_OPERATIONAL_H_CUTOVER"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # Shadow state: this does not replace legacy self.h_state yet.
-        theta = float(getattr(self.h_state, "theta_0", 2.0))
-        gamma = float(getattr(self.h_state, "gamma", 0.05))
+
+        loaded_h_state = self.h_state
+        theta = float(getattr(loaded_h_state, "theta_0", 2.0))
+        gamma = float(getattr(loaded_h_state, "gamma", 0.05))
+
+        # A persisted bridge may already contain the v2.3 operational adapter.
+        # A legacy Runtime state is not silently reinterpreted as v2.3 H: keep
+        # it as an explicit in-memory migration archive and start a new bounded
+        # operational H state.
+        if isinstance(loaded_h_state, V23OperationalHStateAdapter):
+            self.legacy_h_state_archive = None
+            self.h_state = loaded_h_state
+            self.operational_h_migration_reset = False
+        else:
+            self.legacy_h_state_archive = loaded_h_state
+            self.h_state = V23OperationalHStateAdapter(theta_0=theta, gamma=gamma)
+            self.operational_h_migration_reset = True
+
+        # Independent audit/shadow state: useful for comparing the explicit
+        # unresolved-mismatch model with the legacy-compatible operational API.
         self.v23_h_state = UnresolvedMismatchState(theta=theta, gamma=gamma)
         self.v23_coverage = ObservationCoverageState()
 
@@ -95,11 +121,11 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         )
 
         snapshot = self.pending_snapshots[result.ticket_id]
-        # These fields are deliberately additive. Existing ``efp`` remains a
-        # compatibility field until Snapshot/Persistence migration is complete.
+        # Existing ``efp`` remains a compatibility projection while the
+        # canonical acquired interaction section is retained independently.
         snapshot.raw_business_input = raw_request
         snapshot.rib_section = rib_section
-        snapshot.interaction_semantic_version = "core-v2.3-rib-shadow"
+        snapshot.interaction_semantic_version = "core-v2.3-rib-operational-h"
         return result
 
     def resolve_ticket_feedback(
@@ -126,8 +152,8 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
         rib_section_next = acquire_feedback_rib_section(raw_request, feedback)
         snapshot.rib_section_next = rib_section_next
 
-        # Canonical shadow comparison: interpret the acquired subsequent
-        # section, not FeedbackResult itself, through the frozen pre-update M_B.
+        # Canonical comparison: the acquired later section is interpreted by
+        # the same frozen pre-update M_B and interpretation conditions.
         v23_f_prime = None
         v23_mismatch = None
         frozen_context = getattr(snapshot, "frozen_context", None)
@@ -142,7 +168,11 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
                 )
         snapshot.v23_f_prime = v23_f_prime
         snapshot.v23_mismatch = v23_mismatch
+        snapshot.v23_core_e_status = "OBSERVED" if v23_mismatch is not None else "NOT_EVALUATED"
 
+        # Parent resolution still performs product lifecycle work.  Its call to
+        # ``self._finalize_case_metabolism`` dispatches to the override below,
+        # where legacy E/input/C_prime heat is replaced by canonical v2.3 roles.
         result = super().resolve_ticket_feedback(
             ticket_id,
             feedback,
@@ -161,7 +191,7 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
             resolved.rib_section_next = rib_section_next
             resolved.v23_f_prime = v23_f_prime
             resolved.v23_mismatch = v23_mismatch
-            resolved.interaction_semantic_version = "core-v2.3-rib-shadow"
+            resolved.interaction_semantic_version = "core-v2.3-rib-operational-h"
 
             pred = resolved.f_pred
             mb_version = getattr(
@@ -178,9 +208,8 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
                 is_canary=bool(getattr(resolved, "is_canary", False)),
             )
 
-            # Enterprise shadow retention policy: only a mismatch that remains
-            # unresolved by the later observation contributes to the v2.3 H
-            # candidate. Resolution status is separate from F' construction.
+            # Independent audit state mirrors the same unresolved-only
+            # retention rule used by the operational adapter.
             if (
                 v23_mismatch is not None
                 and v23_mismatch.value > 0.0
@@ -194,8 +223,98 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
                 )
 
             resolved.v23_h_total = self.v23_h_state.global_mismatch.total()
+            resolved.v23_operational_h_total = self.h_state.global_heat.total(
+                self.h_state.w_pred,
+                self.h_state.w_input,
+            )
             resolved.v23_coverage_gap_score = self.v23_coverage.coverage_gap_score()
 
+        return result
+
+    def _finalize_case_metabolism(
+        self,
+        snapshot: CaseSnapshot,
+        status: CaseStatus,
+        e_pred: float,
+        e_input: float,
+        feedback: Optional[FeedbackResult] = None,
+        opposing_strength: float = 1.0,
+        is_timeout: bool = False,
+        at: Optional[Any] = None,
+        operation_id: Optional[str] = None,
+        actor_provenance: Optional[Dict[str, Any]] = None,
+    ) -> TicketResolutionResult:
+        """Cut operational H over to the canonical v2.3 mismatch path.
+
+        The parent Runtime still supplies legacy ``e_pred``, ``e_input`` and a
+        legacy C_prime-derived ``opposing_strength``.  None of those values is
+        allowed to directly drive H on this bridge.
+
+        Operational retention rule:
+
+            observed E = Delta(F, F') when a canonical comparison exists
+            retained H increment = E only when the later observation remains
+                                   unresolved/rejected
+            input / coverage metrics = never H
+
+        A neutral retention weight is used until relation-constraint weighting
+        is rebuilt directly from RIB_B rather than the retired EFP' path.
+        """
+
+        observation = getattr(snapshot, "v23_mismatch", None)
+        observed_e: Optional[float] = None
+        retained_mismatch = 0.0
+
+        if observation is not None:
+            observed_e = float(observation.value)
+            unresolved = bool(
+                feedback is not None
+                and (not feedback.user_resolved or feedback.human_rejected)
+            )
+            if unresolved:
+                retained_mismatch = observed_e
+
+        snapshot.v23_observed_e = observed_e
+        snapshot.v23_retained_mismatch = retained_mismatch
+        snapshot.v23_legacy_e_prediction_diagnostic = e_pred
+        snapshot.v23_legacy_e_input_diagnostic = e_input
+
+        result = super()._finalize_case_metabolism(
+            snapshot=snapshot,
+            status=status,
+            e_pred=retained_mismatch,
+            e_input=0.0,
+            feedback=feedback,
+            opposing_strength=1.0,
+            is_timeout=is_timeout,
+            at=at,
+            operation_id=operation_id,
+            actor_provenance=actor_provenance,
+        )
+
+        # Preserve observability without giving diagnostics operational force.
+        result.e_input = e_input
+        if observed_e is None:
+            result.e_prediction = 0.0
+            result.difference_reaction_status = "NOT_EVALUATED"
+        else:
+            result.e_prediction = observed_e
+            if retained_mismatch > 0.0:
+                result.difference_reaction_status = "RETAINED_UNRESOLVED"
+            elif observed_e > 0.0:
+                result.difference_reaction_status = "RESOLVED_NOT_RETAINED"
+            else:
+                result.difference_reaction_status = "NO_MISMATCH"
+
+        result.v23_core_e_status = (
+            "OBSERVED" if observed_e is not None else "NOT_EVALUATED"
+        )
+        result.v23_retained_mismatch = retained_mismatch
+        result.v23_operational_h = self.h_state.global_heat.total(
+            self.h_state.w_pred,
+            self.h_state.w_input,
+        )
+        result.v23_operational_theta = self.h_state.theta_eff()
         return result
 
     def expire_pending_tickets_v23(
@@ -205,9 +324,10 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
     ) -> List[V23TimeoutResolution]:
         """Resolve timeouts without fabricating ``F'``, Core ``E`` or ``H``.
 
-        This method is the canonical migration path. The inherited
-        ``expire_pending_tickets`` remains available only for legacy product
-        compatibility until Runtime cutover.
+        This is the canonical timeout path. The inherited legacy timeout method
+        is still available for product compatibility, but because operational H
+        is now cut over through ``_finalize_case_metabolism`` it cannot add its
+        synthetic legacy E/input values to H on this bridge.
         """
 
         target_ids = ticket_ids if ticket_ids is not None else list(self.pending_snapshots.keys())
@@ -228,13 +348,11 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
                 feedback_comment="timeout: later interaction section unavailable",
                 observed_at=resolved_at,
             )
-            # Crucial semantic difference from legacy mark_unknown(): absence of
-            # a later section is not interpreted as a zero or synthetic delta.
             snapshot.rib_section_next = None
             snapshot.v23_f_prime = None
             snapshot.v23_mismatch = None
             snapshot.v23_core_e_status = "NOT_EVALUATED"
-            snapshot.interaction_semantic_version = "core-v2.3-rib-shadow"
+            snapshot.interaction_semantic_version = "core-v2.3-rib-operational-h"
 
             pred = snapshot.f_pred
             self.v23_coverage.record(
@@ -250,6 +368,10 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
                 is_canary=bool(getattr(snapshot, "is_canary", False)),
             )
             snapshot.v23_h_total = self.v23_h_state.global_mismatch.total()
+            snapshot.v23_operational_h_total = self.h_state.global_heat.total(
+                self.h_state.w_pred,
+                self.h_state.w_input,
+            )
             snapshot.v23_coverage_gap_score = self.v23_coverage.coverage_gap_score()
 
             self.resolved_snapshots.append(snapshot)
@@ -264,8 +386,11 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
                 f_prime_status="NOT_EVALUATED",
                 e_status="NOT_EVALUATED",
                 e_prediction=None,
-                current_h=self.v23_h_state.global_mismatch.total(),
-                current_theta=self.v23_h_state.theta,
+                current_h=self.h_state.global_heat.total(
+                    self.h_state.w_pred,
+                    self.h_state.w_input,
+                ),
+                current_theta=self.h_state.theta_eff(),
                 coverage_gap_score=self.v23_coverage.coverage_gap_score(),
             ))
 
