@@ -35,6 +35,12 @@ from rdl_core import (
     record_supersession,
     request_recompilation,
 )
+from rdl_core.conditional_compiled_function_types import (
+    ConditionalFunctionActivationRecord,
+    ConditionalFunctionPromotionRecord,
+    activate_conditional_function_promotion,
+    evaluate_conditional_function_promotion,
+)
 
 
 def _compiled_function(version: str = "1"):
@@ -69,6 +75,40 @@ def _approved(artifact, candidate, context):
     )
     assert decision.status == PromotionDecisionStatus.APPROVED
     return decision
+
+
+def _conditional_artifacts():
+    context = BoundaryContext("conditional-function-migration")
+    relation = RelationSemanticKey("subject", "supports", "object")
+    cluster = RelationClusterCandidate((relation,), (), context)
+    pattern = derive_relation_pattern(cluster)
+    conditional = build_conditional_relation_candidate(
+        pattern,
+        conditions=("bounded condition",),
+        context=context,
+    )
+    validation = record_conditional_validation(
+        conditional,
+        ConditionalValidationStatus.PASSED,
+        context,
+    )
+    rupture = record_conditional_rupture(
+        conditional,
+        ConditionalRuptureStatus.NOT_DETECTED,
+        context,
+        check_id="durability",
+    )
+    lineage_candidate = compile_lineage_preserving_conditional_candidate(
+        validation,
+        (rupture,),
+        FunctionDescription("example.conditional.operator", "1"),
+        purpose="conditional migration contract",
+        required_checks=("durability",),
+    )
+    compilation = record_conditional_compilation(lineage_candidate, context)
+    legacy = materialize_conditional_compiled_artifact(compilation)
+    canonical = ConditionalCompiledFunction.from_legacy(legacy)
+    return context, rupture, legacy, canonical
 
 
 def test_compiled_function_is_canonical_active_lifecycle_artifact():
@@ -148,37 +188,7 @@ def test_legacy_compiled_mb_remains_accepted_during_migration():
 
 
 def test_conditional_compiled_function_round_trip_preserves_lineage():
-    context = BoundaryContext("conditional-function-migration")
-    relation = RelationSemanticKey("subject", "supports", "object")
-    cluster = RelationClusterCandidate((relation,), (), context)
-    pattern = derive_relation_pattern(cluster)
-    conditional = build_conditional_relation_candidate(
-        pattern,
-        conditions=("bounded condition",),
-        context=context,
-    )
-    validation = record_conditional_validation(
-        conditional,
-        ConditionalValidationStatus.PASSED,
-        context,
-    )
-    rupture = record_conditional_rupture(
-        conditional,
-        ConditionalRuptureStatus.NOT_DETECTED,
-        context,
-        check_id="durability",
-    )
-    lineage_candidate = compile_lineage_preserving_conditional_candidate(
-        validation,
-        (rupture,),
-        FunctionDescription("example.conditional.operator", "1"),
-        purpose="conditional migration contract",
-        required_checks=("durability",),
-    )
-    compilation = record_conditional_compilation(lineage_candidate, context)
-    legacy = materialize_conditional_compiled_artifact(compilation)
-
-    canonical = ConditionalCompiledFunction.from_legacy(legacy)
+    _, _, legacy, canonical = _conditional_artifacts()
     round_tripped = canonical.to_legacy()
 
     assert isinstance(legacy, ConditionalCompiledMB)
@@ -190,3 +200,26 @@ def test_conditional_compiled_function_round_trip_preserves_lineage():
     assert canonical.rupture_coverage == legacy.rupture_coverage
     assert canonical.generic_artifact.to_legacy() == legacy.generic_artifact
     assert round_tripped == legacy
+
+
+def test_canonical_conditional_function_lifecycle_never_reverts_to_compiled_mb():
+    context, rupture, _, canonical = _conditional_artifacts()
+
+    promotion = evaluate_conditional_function_promotion(
+        canonical,
+        (rupture,),
+        context,
+        required_checks=("durability",),
+    )
+    assert isinstance(promotion, ConditionalFunctionPromotionRecord)
+    assert promotion.artifact is canonical
+    assert promotion.decision.status == PromotionDecisionStatus.APPROVED
+    assert promotion.decision.artifact is canonical.generic_artifact
+    assert isinstance(promotion.decision.artifact, CompiledFunction)
+
+    activation = activate_conditional_function_promotion(promotion, context)
+    assert isinstance(activation, ConditionalFunctionActivationRecord)
+    assert activation.promotion is promotion
+    assert isinstance(activation.active, ActiveFunction)
+    assert activation.active.artifact is canonical.generic_artifact
+    assert isinstance(activation.active.artifact, CompiledFunction)
