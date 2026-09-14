@@ -136,7 +136,7 @@ def phase_before(store_path: str, issue_key: str) -> Dict[str, Any]:
     }
     _write_before_evidence(store_path, evidence)
 
-    report = {
+    return {
         "phase": "before",
         "issue_key": issue_key,
         "ticket_id": ticket_id,
@@ -152,7 +152,6 @@ def phase_before(store_path: str, issue_key: str) -> Dict[str, Any]:
             "reference, then run --phase after with --action-reference"
         ),
     }
-    return report
 
 
 def phase_after(
@@ -180,6 +179,29 @@ def phase_after(
     later = connector.lookup({"case_id": issue_key})
     before_observation = before.get("provider_observation")
     provider_changed = _json(before_observation) != _json(later)
+
+    # Do not consume the persisted pending comparison boundary merely because
+    # an operator checked too early. This allows repeated real observations
+    # until an external change is actually visible.
+    if not provider_changed:
+        report = {
+            "phase": "after",
+            "issue_key": issue_key,
+            "ticket_id": ticket_id,
+            "action_reference": action_reference,
+            "provider_state_changed": False,
+            "before_provider_observation": before_observation,
+            "later_provider_observation": later,
+            "canonical_e_status": "NOT_EVALUATED",
+            "p10_bounded_acceptance": False,
+            "pending_boundary_preserved": True,
+        }
+        if require_change:
+            raise SystemExit(
+                "later live provider observation is identical to the stored before observation; "
+                "pending P10 boundary is preserved and the changed-condition gate remains open"
+            )
+        return report
 
     feedback = FeedbackResult(
         user_resolved=False,
@@ -212,18 +234,13 @@ def phase_after(
     canonical_changed = mismatch > 0.0
     accepted = bool(action_reference.strip()) and provider_changed and canonical_changed
 
-    if require_change and not provider_changed:
-        raise SystemExit(
-            "later live provider observation is identical to the stored before observation; "
-            "P10 changed-condition gate remains open"
-        )
     if require_change and not canonical_changed:
         raise SystemExit(
             "provider state changed, but canonical E is zero; the current finite interpretation "
             "did not recover that change, so P10 remains open"
         )
 
-    report = {
+    return {
         "phase": "after",
         "issue_key": issue_key,
         "ticket_id": ticket_id,
@@ -247,7 +264,6 @@ def phase_after(
             "they do not constitute universal causal proof"
         ),
     }
-    return report
 
 
 def main() -> None:
@@ -262,7 +278,7 @@ def main() -> None:
     parser.add_argument(
         "--allow-unchanged",
         action="store_true",
-        help="record a later real observation without closing P10 when provider/canonical state is unchanged",
+        help="report a later unchanged provider observation while preserving the pending P10 boundary",
     )
     args = parser.parse_args()
 
