@@ -2,11 +2,36 @@
 
 ## RDL実装規律
 
-本書は、RDLの語彙をコードへ置換するための用語集ではない。RDLを実装した結果、有限境界・関係拘束・$ξ$・自己例外化禁止という認識論的条件が、暗黙の状態・型変換・テスト解釈によって破壊されないための実装規律である。
+本書は、RDLの語彙をコードへ置換するための用語集ではない。RDLを実装した結果、有限境界・SILN / RIB / RIB_Bの役割分離・関係拘束・$\xi$・自己例外化禁止という認識論的条件が、暗黙の状態・型変換・テスト解釈によって破壊されないための実装規律である。
+
+現在の意味基準は `Aporapeiron/RDL_Core` BASE / SPEC **v2.3** とする。コード上の互換名として旧 `EFP`、`CompiledMB` 等が残る期間があっても、それらを現行Core定義として新規設計へ持ち込まない。
 
 コード上の `exact`、`SUCCESS`、`oracle`、`confidence` などの識別子は、実装上必要であれば保持してよい。ただし、意味層では必ず有限境界 $B$、問い $Q$、時点 $t$、観測断面 $O$、運用目的 $Purpose$、権限・方針・閾値へ写像して読む。
 
 以下で `MUST` は規範上の必須条件、`SHOULD` は正当な理由がある場合に限り逸脱できる推奨条件を示す。各節のEnterprise固有名は規範そのものではなく、参照実装上の例である。
+
+## 0. Coreの役割を同一視しない
+
+Enterprise実装では、少なくとも次を分離する。
+
+```text
+raw request / provider response / feedback
+    != RIB_B
+
+{RIB_i}
+    ↓ acquisition / Section_B
+RIB_B
+    ↓ interp(M_B, RIB_B)
+F
+
+Function != M_B
+Function != SILN
+RIB_B    != F
+```
+
+raw eventは `RIB_B` を構成する材料であり、取得・選択・境界化を経ずにCore作用断面そのものへ昇格させない。Functionは有限契約を持つ演算モジュールとして扱い、その内部拘束が特定実装で `M_B` の局所部分へ統合されることがあっても、両者を同一物としない。
+
+また、$\xi$ は有限Bで未回収となる関係であり、missing rate、unknown count、confidence、entropy、noise、queue size等の実装変数ではない。これらを測定する場合はEnterprise-local metricとして別名で保持する。
 
 ## 1. 世界そのものをCoreの状態にしない
 
@@ -31,6 +56,18 @@ Description -> Candidate -> Evidence / Authority / Verification
 
 `F`と`F'`は同じpre-update $M_B$で解釈し、その差分を$E = Δ(F,F')$として扱う。比較途中で$M_B$を更新してはならない。EnterpriseのSnapshot、ReplayToken、RunContextは、解釈に使った境界と時点を凍結・回収可能にする参照例である。
 
+現行Core標準は次である。
+
+```text
+RIB_B(t)     = Section_B({RIB_i(t)})
+F(t)         = interp(M_B, RIB_B(t))
+RIB_B(t+Δ)   = Section_B({RIB_i(t+Δ)})
+F'(t+Δ)      = interp(M_B, RIB_B(t+Δ))
+E(t+Δ)       = Δ(F, F')
+```
+
+入力欠落、coverage不足、timeout、confidence低下等を、追加のCore `E` として自動加算しない。必要ならEnterprise-local metricとして分離する。
+
 ## 5. 外生条件を隠さない
 
 意味遷移に影響する外生条件をCore深部から隠してはならない。Observation Time、Evidence Time、Commitment Time、Simulation Time、seed、外部モデル、検索結果のうち、F/F'、Constraint activation、Commitment、H、$M_Δ$、Actionに影響するもの MUST be recoverable through Context or Provenance。`datetime.utcnow()` や `random.random()` の直接呼出しは避ける。意味遷移に影響しないログ配送時刻、UI metadata、監査用wall clockなどは、意味境界の外部であることを明示すればよい。
@@ -41,7 +78,7 @@ Description -> Candidate -> Evidence / Authority / Verification
 
 ## 7. 強い状態を真理へ変換しない
 
-高い `confidence`、大きな `support_count`、強いinertia、高いauthority、安定したreplay結果から `is_true = True` を導かない。これらは$M_B$内の拘束状態であり、$ξ$を消去しない。
+高い `confidence`、大きな `support_count`、強いinertia、高いauthority、安定したreplay結果から `is_true = True` を導かない。これらは$M_B$内の拘束状態であり、$\xi$を消去しない。
 
 ## 8. 十分性を局所化する
 
@@ -55,7 +92,7 @@ LLM出力 MUST NOT be committed directly。LLM出力は候補関係材料であ�
 LLM -> Candidate -> RDL evaluation -> Adopt / Hold / Verify / HITL
 ```
 
-を通過させる。LLMは未回収関係$ξ$の探索候補生成器であって、$ξ$の解消器ではない。
+LLMは、現在のBで未解決な問いに対する候補関係・候補説明・追加観測候補を生成する道具として使える。しかし、LLMが `ξ` の内容を取得・列挙・縮小したとみなしてはならない。
 
 ## 10. ReplayとVerificationを有限化する
 
@@ -77,6 +114,10 @@ State Digestは現在の観測境界で後続遷移に影響すると扱う遷�
 
 以下はBASE/SPECに直結するCore規範であり、単なる設計上の好みではない。
 
+- Raw input / Observation MUST NOT be identified directly with `RIB_B`; acquisition / finite sectioning must remain recoverable.
+- `RIB_B` MUST NOT be identified with `F`.
+- Function MUST NOT be identified with `M_B` or SILN.
+- $\xi$ MUST NOT be represented as noise, uncertainty, missing-data rate, unknown count, or another measurable runtime score.
 - Object creation MUST NOT imply Commitment or Active Constraint.
 - `UNKNOWN` MUST NOT collapse into `FAILURE`、`OPPOSE`、または `SUPPORT`。
 - Authority MUST NOT imply Truth。Authority、Scope、Target、Relationは分離して評価する。
@@ -92,8 +133,14 @@ State Digestは現在の観測境界で後続遷移に影響すると扱う遷�
 
 RDL Coreへ移植する際は、Enterpriseのクラス名・API名をそのまま規範とみなさない。`MBNode`、`ReplayToken`、`RunContext`、`Authority` は、Description/Commitmentの分離、境界固定、権限拘束という規範を具体化した参照実装である。Gameでは `Rumor`、`Belief Candidate`、`Committed Belief`、`Behavioral Constraint` など別の型へ写像してよいが、規範上の関係は維持しなければならない。
 
+同様に、移行期間中の `EFP`、`CompiledMB`、`xi_obs` 等の名前は互換実装名であり、Core v2.3の規範語彙として再利用しない。
+
 ## 実装レビュー時の最小チェック
 
+- raw inputから`RIB_B`を構成する取得・断面化境界が回収可能か
+- `RIB_B`と`F`を分離しているか
+- Functionと`M_B`を同一視していないか
+- $\xi$をruntime scoreやnoiseとして実体化していないか
 - 世界の真理・現実・絶対安全を内部状態へ直接入れていないか
 - Description、Candidate、Evidence、Commitment、Active Constraintを分離しているか
 - `UNKNOWN`、`OPPOSE`、`timeout`を失敗へ潰していないか
