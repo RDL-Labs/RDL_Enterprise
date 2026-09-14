@@ -16,8 +16,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from rdl_enterprise import (
     AtlassianJiraConnector,
@@ -66,6 +67,10 @@ def _json(value: Dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _provenance_dict(value: Optional[Any]) -> Optional[Dict[str, Any]]:
+    return asdict(value) if value is not None else None
+
+
 def phase_before(store_path: str, issue_key: str) -> Dict[str, Any]:
     connector = _connector()
     observation = connector.lookup({"case_id": issue_key})
@@ -98,7 +103,7 @@ def phase_before(store_path: str, issue_key: str) -> Dict[str, Any]:
         "ticket_id": ticket_id,
         "store_path": str(Path(store_path).resolve()),
         "request_boundary_id": snapshot.rib_section.boundary_id,
-        "request_provenance": dict(snapshot.rib_section.provenance),
+        "request_provenance": _provenance_dict(snapshot.rib_section.provenance),
         "initial_f_content": getattr(snapshot.f_pred, "content", None),
         "provider_observation": observation,
         "final_output": dispatched.final_output,
@@ -172,8 +177,8 @@ def phase_after(
         "action_reference": action_reference,
         "request_boundary_id": snapshot.efp.boundary_id,
         "later_boundary_id": snapshot.rib_section_next.boundary_id,
-        "request_provenance": dict(snapshot.efp.provenance),
-        "later_provenance": dict(snapshot.rib_section_next.provenance),
+        "request_provenance": _provenance_dict(snapshot.efp.provenance),
+        "later_provenance": _provenance_dict(snapshot.rib_section_next.provenance),
         "canonical_e_status": snapshot.v23_core_e_status,
         "canonical_e": mismatch,
         "canonical_e_reasons": list(snapshot.v23_mismatch.reasons),
