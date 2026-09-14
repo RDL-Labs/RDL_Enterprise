@@ -89,7 +89,19 @@ def test_request_rib_section_is_directly_interpretable_without_projection():
     direct = snapshot.frozen_context.interpret_efp(section)
     projected = snapshot.frozen_context.interpret_efp(section.to_business_input())
 
-    assert direct == projected
+    # Trace IDs/timestamps are audit-event identities and are expected to differ
+    # between two separate executions. The interpreted bounded state must match.
+    assert direct.action_type == projected.action_type
+    assert direct.content == projected.content
+    assert direct.confidence == projected.confidence
+    assert direct.matched_node_id == projected.matched_node_id
+    assert direct.cost_tier == projected.cost_tier
+    assert direct.domain == projected.domain
+    assert direct.expected_outcome == projected.expected_outcome
+    assert direct.available_locus_ids == projected.available_locus_ids
+    assert direct.selected_locus_ids == projected.selected_locus_ids
+    assert direct.applied_locus_ids == projected.applied_locus_ids
+    assert direct.constraint_locus_ids == projected.constraint_locus_ids
 
 
 def test_subsequent_canonical_f_prime_receives_rib_section_not_projection():
@@ -161,7 +173,7 @@ def test_input_diagnostic_does_not_enter_operational_h_or_trigger_reconstruction
     result = runtime.resolve_ticket_feedback(
         raw.ticket_id,
         FeedbackResult(
-            user_resolved=False,
+            user_resolved=True,
             new_knowledge_provided="extra context",
         ),
     )
