@@ -3,7 +3,23 @@ from rdl_enterprise import (
     EnterpriseRuntimeRIBBridge,
     FeedbackResult,
     RIBSection,
+    V23OperationalHStateAdapter,
 )
+
+
+class MarkerLLMBridge:
+    """Deterministic test bridge whose output changes on the later RIB section."""
+
+    model_name = "marker-test"
+    temperature = 0.0
+    system_prompt_version = "v1"
+
+    def resolve(self, request, mb_view=None):
+        later = "【後続観測】" in request.query_text
+        return {
+            "type": "direct_reply",
+            "payload": "later-state" if later else "initial-state",
+        }
 
 
 def test_runtime_bridge_acquires_request_section_before_legacy_interpretation():
@@ -19,7 +35,8 @@ def test_runtime_bridge_acquires_request_section_before_legacy_interpretation():
     result = runtime.dispatch_ticket(raw)
     snapshot = runtime.pending_snapshots[result.ticket_id]
 
-    assert runtime.migration_stage == "P1_P4_RIB_MISMATCH_TIMEOUT_SHADOW"
+    assert runtime.migration_stage == "P1_P5_RIB_OPERATIONAL_H_CUTOVER"
+    assert isinstance(runtime.h_state, V23OperationalHStateAdapter)
     assert isinstance(snapshot.rib_section, RIBSection)
     assert snapshot.raw_business_input is raw
     assert snapshot.rib_section.section_role == "request_observation"
@@ -27,7 +44,7 @@ def test_runtime_bridge_acquires_request_section_before_legacy_interpretation():
     assert snapshot.efp is not raw
     assert snapshot.efp.metadata["rib_section_id"] == snapshot.rib_section.section_id
     assert snapshot.efp.metadata["interaction_series_id"] == "bridge-series"
-    assert snapshot.interaction_semantic_version == "core-v2.3-rib-shadow"
+    assert snapshot.interaction_semantic_version == "core-v2.3-rib-operational-h"
 
 
 def test_runtime_bridge_acquires_subsequent_section_and_records_separate_v23_states():
@@ -54,16 +71,108 @@ def test_runtime_bridge_acquires_subsequent_section_and_records_separate_v23_sta
     assert snapshot.v23_f_prime is not None
     assert snapshot.v23_mismatch is not None
     assert snapshot.v23_h_total >= 0.0
+    assert snapshot.v23_operational_h_total >= 0.0
     assert snapshot.v23_coverage_gap_score > 0.0
     assert not hasattr(runtime.v23_coverage, "xi_obs")
     assert not hasattr(runtime.v23_h_state, "xi_obs")
+
+
+def test_input_diagnostic_does_not_enter_operational_h_or_trigger_reconstruction():
+    runtime = EnterpriseRuntimeRIBBridge(theta_0=0.1)
+    raw = BusinessInput("BRIDGE-INPUT", "operator", None, "x")
+    runtime.dispatch_ticket(raw)
+
+    result = runtime.resolve_ticket_feedback(
+        raw.ticket_id,
+        FeedbackResult(
+            user_resolved=False,
+            new_knowledge_provided="extra context",
+        ),
+    )
+
+    snapshot = runtime.resolved_snapshots[-1]
+    assert result.e_input > 0.0  # legacy diagnostic remains observable
+    assert snapshot.v23_mismatch is not None
+    assert snapshot.v23_mismatch.value == 0.0
+    assert result.v23_retained_mismatch == 0.0
+    assert result.current_h == 0.0
+    assert result.v23_operational_h == 0.0
+    assert result.current_theta_eff == 0.1
+    assert not result.transition_to_m_delta
+    assert snapshot.v23_coverage_gap_score > 0.0
+
+
+def test_unresolved_canonical_delta_is_the_only_operational_h_increment():
+    runtime = EnterpriseRuntimeRIBBridge(
+        theta_0=10.0,
+        llm_bridge=MarkerLLMBridge(),
+    )
+    raw = BusinessInput("BRIDGE-DELTA", "operator", "workflow", "inspect state")
+    runtime.dispatch_ticket(raw)
+
+    result = runtime.resolve_ticket_feedback(
+        raw.ticket_id,
+        FeedbackResult(user_resolved=False, feedback_comment="still unresolved"),
+    )
+
+    snapshot = runtime.resolved_snapshots[-1]
+    assert snapshot.v23_mismatch is not None
+    assert snapshot.v23_mismatch.value > 0.0
+    assert result.e_prediction == snapshot.v23_mismatch.value
+    assert result.v23_retained_mismatch == snapshot.v23_mismatch.value
+    assert result.current_h > 0.0
+    assert result.difference_reaction_status == "RETAINED_UNRESOLVED"
+    assert result.current_theta_eff == 10.0
+    assert not result.transition_to_m_delta
+
+
+def test_resolved_delta_is_observed_but_not_retained_as_h():
+    runtime = EnterpriseRuntimeRIBBridge(
+        theta_0=0.1,
+        llm_bridge=MarkerLLMBridge(),
+    )
+    raw = BusinessInput("BRIDGE-RESOLVED", "operator", "workflow", "inspect state")
+    runtime.dispatch_ticket(raw)
+
+    result = runtime.resolve_ticket_feedback(
+        raw.ticket_id,
+        FeedbackResult(user_resolved=True, feedback_comment="resolved after response"),
+    )
+
+    snapshot = runtime.resolved_snapshots[-1]
+    assert snapshot.v23_mismatch is not None
+    assert snapshot.v23_mismatch.value > 0.0
+    assert result.e_prediction == snapshot.v23_mismatch.value
+    assert result.v23_retained_mismatch == 0.0
+    assert result.current_h == 0.0
+    assert result.difference_reaction_status == "RESOLVED_NOT_RETAINED"
+    assert not result.transition_to_m_delta
+
+
+def test_coverage_observations_do_not_lower_operational_theta():
+    runtime = EnterpriseRuntimeRIBBridge(theta_0=2.0)
+    raw = BusinessInput("BRIDGE-COVERAGE", "operator", None, "unknown")
+    runtime.dispatch_ticket(raw)
+    runtime.resolve_ticket_feedback(
+        raw.ticket_id,
+        FeedbackResult(user_resolved=False, human_rejected=True),
+    )
+
+    assert runtime.v23_coverage.coverage_gap_score() > 0.0
+    assert runtime.h_state.coverage_gap_score() == 0.0
+    assert runtime.h_state.theta_eff() == 2.0
+    # This adapter never claims that a zero compatibility score means xi == 0.
+    assert runtime.h_state.semantic_version == "core-v2.3-operational-h-adapter"
 
 
 def test_v23_timeout_does_not_fabricate_f_prime_e_or_h():
     runtime = EnterpriseRuntimeRIBBridge()
     raw = BusinessInput("BRIDGE-TIMEOUT", "operator", "workflow", "pending request")
     runtime.dispatch_ticket(raw)
-    h_before = runtime.v23_h_state.global_mismatch.total()
+    h_before = runtime.h_state.global_heat.total(
+        runtime.h_state.w_pred,
+        runtime.h_state.w_input,
+    )
 
     results = runtime.expire_pending_tickets_v23([raw.ticket_id])
 
