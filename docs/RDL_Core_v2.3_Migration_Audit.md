@@ -1,23 +1,21 @@
 # RDL Enterprise — Core v2.3 Migration Audit
 
 *Status: ACTIVE MIGRATION AUDIT*  
-*Baseline reviewed: `main` at `06420a78752ed43a9d8a3d62e939c3ebd08be067`*  
+*Current reviewed boundary: staged migration through P7; P8–P10 remain open*  
 *Canonical semantic source: `Aporapeiron/RDL_Core` BASE / SPEC v2.3*  
 *Related current sources: `RDL_Functions`, `RDL_Durability_Modules`*
 
 ## 0. Purpose
 
-This document records the migration boundary from the Enterprise implementation built around the v2.0/v2.1 `EFP` generation to the current Core v2.3 `RIB / RIB_B` model.
+This document records the migration boundary from the Enterprise implementation built around the older `EFP` generation to the current Core v2.3 `RIB / RIB_B` model.
 
-The goal is **not** to rewrite working Enterprise mechanisms merely to rename symbols. The goal is to preserve mechanisms that remain useful while removing semantic identities that no longer match the current Core.
+The goal is not to rewrite working Enterprise mechanisms merely to rename symbols. The goal is to preserve useful mechanisms while removing semantic identities that no longer match current Core.
 
-Enterprise implementation names are not canonical RDL primitives. During migration, backward-compatible names may remain temporarily, but they must be marked as compatibility surfaces rather than current semantic definitions.
+Enterprise implementation names are not canonical RDL primitives. Backward-compatible names may remain temporarily, but current design must not infer Core ontology from those names.
 
 ---
 
-## 1. Current canonical baseline
-
-Enterprise now treats the following as the canonical semantic skeleton:
+## 1. Canonical baseline
 
 ```text
 nonlinear relational network
@@ -33,9 +31,11 @@ F = interp(M_B, RIB_B)
         ↓
 optional comparison of F / F'
         ↓
-E → unresolved remainder → H
+E = Δ(F, F')
+        ↓ unresolved remainder
+        H
         ↓
-H < θ / H ≥ θ → M_Δ → M_B'
+H < θ / H >= θ → M_Δ → M_B'
 ```
 
 Required separations:
@@ -47,7 +47,7 @@ Enterprise Runtime         != M_B
 Function                   != M_B
 noise / uncertainty        != ξ
 missing observation        != ξ
-queue / load / input gap   != H
+coverage / input gap       != E != H
 static structural conflict != E != H
 Human Attention            != H
 ```
@@ -64,122 +64,87 @@ F'(t+Δ)      = interp(M_B, RIB_B(t+Δ))
 E(t+Δ)       = Δ(F, F')
 ```
 
-`ξ` is the relation not recovered under a finite `B`. It is not a random variable, a missing-data counter, an uncertainty score, an exploration target, a hidden store, or a quantity injected into the runtime.
+`ξ` is relation not recovered under a finite `B`. It is not a random variable, missing-data counter, uncertainty score, exploration target, hidden store, or injected runtime quantity.
 
 ---
 
-## 2. Findings
+## 2. Findings and current disposition
 
-### F1 — raw `BusinessInput` is currently treated as EFP
+### F1 — raw `BusinessInput` was treated as the interaction primitive
 
-Current code passes `BusinessInput` directly into `InterpCascade.interpret()` and names that input `efp` throughout Runtime, Snapshot, Constraint, and tests.
+**Original issue:** raw business input was passed directly through the interpretation stack without an explicit finite interaction-section role.
 
-This collapses two roles:
+**Current disposition: RESOLVED ON MIGRATION SURFACE.**
+
+`src/rdl_enterprise/interaction.py` now provides `RIBSection` and explicit request acquisition. `EnterpriseRuntimeRIBBridge` retains raw input separately and uses a finite `RIBSection` as the canonical interaction role.
+
+Remaining debt: the bridge still projects `RIBSection` back into `BusinessInput` for the inherited Runtime/Cascade. Removing that semantic dependency is P8.
+
+### F2 — later interaction was synthesized as `EFP'`
+
+**Original issue:** `FeedbackResult` / `EFPPrimeAdapter` semantics collapsed later raw observation, later interaction section, and subsequent interpretation.
+
+**Current disposition: RESOLVED ON RIB BRIDGE.**
+
+Later feedback is acquired into a separate subsequent `RIBSection`, interpreted through the same frozen pre-update `M_B` / interpretation conditions, and recorded separately as `F'` and `Δ(F,F')`.
+
+Legacy EFP-named fields may remain as compatibility surfaces in old Snapshot/Runtime code.
+
+### F3 — Enterprise `e_input` was mixed into Core H
+
+**Original issue:** input/acquisition gap contributed to the quantity used for `H >= θ` reconstruction.
+
+**Current disposition: RESOLVED FOR OPERATIONAL H ON RIB BRIDGE.**
+
+`EnterpriseRuntimeRIBBridge` replaces the parent metabolism inputs before H accumulation:
 
 ```text
-raw business event / request
-        ↓ acquisition / selection under B
-RIB_B
+canonical unresolved Δ(F,F') -> operational H
+legacy e_input                -> diagnostic only
+coverage / missing            -> Enterprise-local observation
 ```
 
-The acquisition / finite-section step is currently implicit.
+The historical `HState.input_err` field remains for base-Runtime compatibility and is explicitly documented as non-Core.
 
-**Migration requirement:** introduce an explicit Enterprise finite interaction section (`RIBSection`) and make raw `BusinessInput` a source used to construct it.
+### F4 — `ξ` was implemented as an observable score
 
----
+**Original issue:** unclassified / missing / unknown / rejection rates were named `xi_obs` and used by an Enterprise threshold policy.
 
-### F2 — subsequent interaction is currently synthesized as `EFP'`
+**Current disposition: RESOLVED FOR CURRENT API; LEGACY ALIAS RETAINED.**
 
-`EFPPrimeAdapter` merges `FeedbackResult` and the original request into another `BusinessInput`, then reinterprets it as `F'`.
+Canonical name is `coverage_gap_score`. `xi_obs()` remains only as a deprecated compatibility alias and explicitly does not represent Core `ξ`.
 
-The useful property should be retained: `F` and `F'` are formed using the same pre-update interpretation structure and frozen interpretation conditions.
+Any coverage-adjusted threshold remains an Enterprise policy, not a Core consequence of `ξ`.
 
-The obsolete semantic identity is:
+### F5 — timeout fabricated mismatch / uncertainty heat
+
+**Original issue:** timeout could create fixed mismatch/input values despite no adequate later interaction state.
+
+**Current disposition: RESOLVED ON CANONICAL RIB TIMEOUT PATH.**
+
+`expire_pending_tickets_v23()` records later `RIB_B`, `F'`, and `E` as `NOT_EVALUATED` when unavailable and does not add fabricated H. The inherited legacy timeout API remains callable for compatibility, but its synthetic values cannot enter operational H through the bridge adapter.
+
+### F6 — Function was identified with Compiled M_B
+
+**Original issue:** names such as `CompiledMB`, `ConditionalCompiledMB`, and `ActiveCompiledMB` encouraged `Function = M_B`.
+
+**Current disposition: RESOLVED FOR PUBLIC CORE API; LEGACY NAMES RETAINED.**
+
+Canonical public names now include:
 
 ```text
-FeedbackResult = EFP'
+CompiledFunction
+ActiveFunction
+ConditionalCompiledFunction
+ConditionalFunctionPromotionRecord
+ConditionalFunctionActivationRecord
 ```
 
-**Migration requirement:** construct a subsequent `RIB_B(t+Δ)` from later observations / responses / provider records / interaction history. Preserve the frozen pre-update `M_B` comparison discipline.
-
----
-
-### F3 — Enterprise `e_input` is mixed into Core H
-
-`CaseSnapshot.record_feedback()` currently computes both:
-
-```text
-e_prediction = Δ(F, F')
-e_input      = an Enterprise-specific input-gap score
-```
-
-`HState.add_heat()` then accepts both `pred_err` and `input_err`, and both contribute to the quantity used for the `H ≥ θ` transition.
-
-Under current Core, the standard `E` is the `F / F'` mismatch. Input completeness, acquisition gaps, missing fields, queue load, confidence, and similar metrics may exist as Enterprise-local observations, but they do not automatically become Core `E` or `H`.
-
-**Migration requirement:** rename / reclassify `e_input` as an Enterprise acquisition or coverage metric and remove its automatic contribution to Core `H`.
-
----
-
-### F4 — `ξ` is implemented as an observable score
-
-`HState` currently records unclassified, missing, unknown, and rejected events as `ξ_obs`, then lowers `θ_eff` using this score.
-
-This is incompatible with Core v2.3.
-
-Useful observations may remain, but their role must be explicit:
-
-```text
-unclassified rate
-missing information rate
-unknown-route rate
-rejection rate
-coverage gap
-```
-
-These are modeled Enterprise observations, **not `ξ`**.
-
-**Migration requirement:** rename the score and remove the claim that it measures `ξ`. Any threshold adaptation must be declared as an Enterprise policy, not a Core consequence of `ξ`.
-
----
-
-### F5 — timeout currently fabricates Core mismatch / ξ heat
-
-`CaseSnapshot.mark_unknown()` currently creates fixed `e_prediction` / `e_input` values and describes the result as uncertainty heat left as `ξ`.
-
-If no later `RIB_B` can be formed, then `F'` and Core `E` are not established merely by timeout.
-
-**Migration requirement:** timeout should record `NOT_EVALUATED` / unresolved acquisition state. It may affect Enterprise risk, attention, retry, or coverage metrics, but must not fabricate Core `E`, `H`, or `ξ`.
-
----
-
-### F6 — Function is identified with Compiled M_B
-
-`docs/RDL_Compiled_MB.md` explicitly states `Function = Compiled M_B`. Core-local types also expose names such as:
-
-```text
-CompiledMB
-ConditionalCompiledMB
-ActiveCompiledMB
-```
-
-Current `RDL_Functions` separates these roles:
-
-```text
-Function != M_B
-Function != SILN
-Function != RIB_B
-```
-
-A Function is a reusable operatorized constraint / transform / evaluation module with a finite contract, inputs, outputs, provenance, and unresolved / failure conditions. Its internal constraints may be integrated into an `M_B` implementation section in a particular system, but identity is not equivalence.
-
-**Migration requirement:** introduce canonical Function artifact names and keep `*CompiledMB` only as compatibility aliases during transition.
-
----
+Normal and conditional canonical lifecycles are tested without reverting to a `CompiledMB` artifact. Historical names remain compatibility types / aliases only.
 
 ### F7 — useful Enterprise invariants remain valid
 
-The following existing design disciplines are retained:
+**Current disposition: RETAINED.**
 
 ```text
 Observation != Candidate != Commitment != Active
@@ -192,218 +157,205 @@ provenance and finite boundary are recoverable
 test success != universal truth
 ```
 
-The migration should preserve these rather than rebuild Enterprise from zero.
+### F8 — meaning-affecting observation time leaked to wall clock
+
+**Observed during migration:** 60-day exact Simulation replay intermittently diverged at different records despite identical seed and virtual clock.
+
+`BusinessInput.created_at` already carried Simulation time, but `FrozenInterpretationContext.constraint_evaluation_time` fell back to actual wall clock. Constraint freshness could therefore vary between otherwise identical runs.
+
+**Current disposition: RESOLVED.**
+
+`EnterpriseRuntime.dispatch_ticket()` now binds explicit `BusinessInput.created_at` into the frozen interpretation context. Invalid or absent explicit times retain the compatibility fallback. The full test suite, including 60-day exact lifecycle determinism, passes under this boundary.
 
 ---
 
-## 3. Affected surfaces
+## 3. Current architecture boundary
 
-### Semantic / documentation
-
-High-priority current documents:
-
-- `README.md`
-- `docs/INTERACTION_REFLECTION_PLAN_v0.2.md`
-- `docs/RDL_Coding_Principles.md`
-- `docs/RDL_Compiled_MB.md`
-- `docs/RDL_Core_Extraction_Gate.md`
-- `docs/RDL_Core_Route_v0.1.md`
-- `docs/RDL_Product_Status_v0.1.md`
-- `docs/RDL_Reference_Sources.md`
-- current detailed design and parameter documents
-
-Historical phase documents may retain old terminology when clearly marked as historical / pre-v2.3 material.
-
-### Runtime semantic hot spots
-
-- `src/rdl_enterprise/snapshot.py`
-  - `BusinessInput`
-  - `CounterfactualInput.efp`
-  - `FrozenInterpretationContext.interpret_efp()`
-  - `EFPPrimeAdapter`
-  - `FeedbackResult` description
-  - `CaseSnapshot.efp / efp_prime`
-  - timeout handling
-- `src/rdl_enterprise/cascade.py`
-  - `interpret(efp)`
-  - selection / constraint functions parameterized directly by `BusinessInput`
-- `src/rdl_enterprise/runtime.py`
-  - `dispatch_ticket(efp)`
-  - `resolve_ticket_feedback()`
-  - `e_input` → H path
-  - `compute_efp_prime_constraint`
-- `src/rdl_enterprise/constraint.py`
-  - `ConstraintContext.efp`
-  - `BundleAuxiliary` described as `ξ evidence`
-  - EFP-prime constraint naming
-- `src/rdl_enterprise/h_state.py`
-  - `input_err` as H component
-  - `ξ_obs`
-  - `theta_eff = theta0 - g(ξ_obs)`
-
-### Core-local Function hot spots
-
-- `src/rdl_core/evolution_types.py`
-- `src/rdl_core/activation_types.py`
-- `src/rdl_core/registry_types.py`
-- `src/rdl_core/recompilation_types.py`
-- exported names in `src/rdl_core/__init__.py`
-
-### Tests that currently pin old semantics
-
-At minimum:
-
-- `tests/test_core.py`
-- `tests/test_interaction_trace.py`
-- `tests/test_p10_live_interaction.py`
-- `tests/test_core_contracts.py`
-- `tests/test_constraint_model.py`
-- `tests/test_product_acceptance.py`
-
-Examples already identified:
-
-- `test_h_state_dissipation_and_theta_eff` expects an unknown-input score to reduce θ.
-- timeout tests currently treat missing subsequent observation as uncertainty heat.
-- P10 explicitly names the later observation as `subsequent_efp`.
-- interaction trace tests assert `efp_prime` state.
-
----
-
-## 4. Migration order
-
-### P0 — Semantic freeze and compatibility policy
-
-1. Declare BASE / SPEC v2.3 as the only current semantic baseline.
-2. Record old `EFP` and `Function = Compiled M_B` names as compatibility debt, not canonical definitions.
-3. Preserve current working behavior while adding v2.3 roles in parallel.
-
-Acceptance:
+### Canonical migration path
 
 ```text
-No new code is allowed to introduce EFP as a canonical primitive.
-No new code may equate Function with M_B.
-No new code may model ξ as a measurable runtime quantity.
-```
+raw request
+  ↓ acquire under B
+RIBSection(t)
+  ↓ compatibility projection
+existing Cascade / frozen M_B
+  ↓
+F(t)
 
-### P1 — Explicit RIB_B acquisition layer
-
-Add a finite interaction-section contract:
-
-```text
-raw business / provider / feedback observations
-        ↓ acquisition under Purpose / B
-RIBSection  (Enterprise representation of RIB_B)
-        ↓
-interp(M_B, RIBSection)
-        ↓
-F
-```
-
-Initially keep adapters back to the current `BusinessInput`-based Cascade so behavior remains testable.
-
-### P2 — Subsequent interaction and F/F'
-
-Replace semantic `EFPPrimeAdapter` with a subsequent-section builder:
-
-```text
-later observations / responses / changed provider state
-        ↓ acquisition under the same comparison B where required
-RIB_B(t+Δ)
-        ↓ same pre-update M_B
+later raw observation
+  ↓ acquire under B
+RIBSection(t+Δ)
+  ↓ same frozen pre-update M_B
 F'(t+Δ)
-        ↓
-E = Δ(F, F')
+  ↓
+Δ(F,F')
+  ↓ unresolved only
+V23OperationalHStateAdapter
 ```
 
-Retain frozen interpretation context and replay evidence where they remain useful.
-
-### P3 — Separate Core H from Enterprise metrics
-
-- Core mismatch candidate: `E = Δ(F, F')`.
-- Enterprise-local metrics: acquisition gap, missing data, unresolved route, confidence, queue load, human attention, risk, security, provider availability.
-- Only an explicitly declared unresolved-E policy may feed Core H.
-- timeout without `F'` becomes `NOT_EVALUATED`, not fabricated E/H.
-
-### P4 — Remove ξ quantification
-
-Rename `ξ_obs` and all derived policy use to Enterprise-local coverage / unresolved-observation metrics.
+### Compatibility boundary still present
 
 ```text
-coverage_gap_score != ξ
-missing_info_count  != ξ
-unknown_route_rate  != ξ
+RIBSection
+  ↓ to_business_input()
+BusinessInput-named Runtime / Cascade surfaces
 ```
 
-If an Enterprise policy uses these values to change a review threshold, that policy must be named and tested as an Enterprise policy.
+This adapter is currently deliberate. It preserves working Authority, persistence, canary, promotion, ledger, snapshot and product behavior while the semantic foundation migrates.
 
-### P5 — Function identity migration
-
-Introduce canonical names such as `CompiledFunction` / `ActiveFunction` while retaining old `CompiledMB` names as deprecated compatibility aliases until all callers migrate.
-
-Do not change runtime behavior solely to satisfy naming.
-
-### P6 — Documentation and acceptance rewrite
-
-Update current README / plans / acceptance tests to:
-
-```text
-RIB / RIB_B
-Core v2.3
-Function != M_B
-ξ != modeled unknown
-```
-
-Historical documents can remain unchanged if clearly marked pre-v2.3.
+It is also the next debt boundary: P8 should make `RIBSection` a first-class Runtime input rather than a semantic role projected back into an older type.
 
 ---
 
-## 5. Compatibility policy
+## 4. Migration phase status
+
+| Phase | Contract | Status |
+| --- | --- | --- |
+| P0 | Freeze Core v2.3 semantic baseline / compatibility policy | **DONE** |
+| P1 | Explicit request `RIBSection` acquisition | **DONE** |
+| P2 | Explicit later interaction acquisition | **DONE** |
+| P3 | Same-pre-update-M_B `F / F'` comparison | **DONE** |
+| P4 | Separate unresolved mismatch H from coverage | **DONE** |
+| P5 | Remove `e_input` operational force from bridge H / M_Δ | **DONE ON RIB BRIDGE** |
+| P6 | Observable-ξ terminology removal | **DONE FOR CURRENT API; legacy alias retained** |
+| P7 | Function identity migration | **DONE FOR PUBLIC CORE API** |
+| P8 | Native Runtime cutover to RIBSection | **OPEN** |
+| P9 | Persist canonical RIB / mismatch state through restart | **OPEN** |
+| P10 | One complete real interaction acceptance chain | **PARTIAL / OPEN** |
+
+`DONE` means the declared contract is implemented and covered by the current finite tests. It does not imply terminal completeness.
+
+---
+
+## 5. Function migration acceptance
+
+Canonical normal lifecycle:
+
+```text
+StructureCandidate
+→ FunctionCandidate
+→ CompilationRecord(PASSED)
+→ CompiledFunction
+→ PromotionDecision
+→ ActiveFunction
+→ Deactivation / Recompilation / Supersession
+```
+
+Canonical conditional lifecycle:
+
+```text
+ConditionalFunctionCandidate
+→ ConditionalCompiledFunction
+→ ConditionalFunctionPromotionRecord
+→ ConditionalFunctionActivationRecord
+→ ActiveFunction
+```
+
+Compatibility remains available:
+
+```text
+CompiledMB
+ConditionalCompiledMB
+ActiveCompiledMB
+ConditionalPromotionRecord
+ConditionalActivationRecord
+```
+
+The compatibility names do not define ontology. New code should use canonical Function names.
+
+---
+
+## 6. Test evidence currently pinning v2.3 migration
+
+Current regression contracts include:
+
+- raw request acquisition keeps raw input and `RIBSection` distinct;
+- later observation forms a separate subsequent section;
+- `e_input > 0` does not enter bridge operational H or trigger reconstruction;
+- unresolved canonical `Δ(F,F')` is the bridge operational H increment;
+- resolved mismatch may be observed without being retained as H;
+- coverage observations do not lower bridge operational θ;
+- canonical timeout does not fabricate `F'`, `E`, or H;
+- explicit observation time is frozen into interpretation context;
+- 60-day fixed-condition lifecycle replay remains deterministic under that time boundary;
+- `CompiledFunction` lifecycle works through promotion, activation, deactivation, recompilation and supersession;
+- legacy `CompiledMB` remains accepted during migration;
+- conditional Function lineage round-trips through the legacy compatibility shape;
+- canonical conditional promotion / activation remains on `CompiledFunction` / `ActiveFunction` artifacts.
+
+These tests establish bounded implementation contracts only.
+
+---
+
+## 7. Compatibility policy
 
 During migration:
 
-- Existing external behavior should remain stable unless the behavior itself encodes an invalid Core semantic claim.
-- Old names may survive temporarily only as compatibility aliases / properties / adapters.
-- New tests should target canonical v2.3 names.
-- Old tests should be migrated rather than deleted when the operational invariant remains valid.
-- When a previous test asserted an invalid semantic identity, replace it with the closest valid bounded observation rather than weakening the test.
+- Existing external behavior remains stable unless it encodes an invalid current-Core semantic claim.
+- Old names survive only as compatibility aliases / properties / adapters.
+- New tests target canonical v2.3 names.
+- Operational invariants are migrated, not deleted, when their role remains valid.
+- Invalid semantic identities are replaced with the closest valid bounded observation rather than weakening tests.
 
 Examples:
 
 ```text
-efp            -> legacy alias / raw input compatibility surface
-rib_section    -> canonical finite interaction section
+efp / BusinessInput       -> raw / compatibility input surface
+RIBSection                -> canonical finite interaction section
 
-efp_prime      -> legacy alias
-rib_section_next -> canonical subsequent finite section
+efp_prime                 -> legacy later-input compatibility surface
+subsequent RIBSection     -> canonical later interaction section
 
-e_input        -> acquisition_gap / coverage metric
-ξ_obs          -> coverage_gap_score
-CompiledMB     -> compatibility alias for canonical Function artifact
+e_input                   -> acquisition/input diagnostic
+xi_obs                    -> deprecated alias for coverage_gap_score
+CompiledMB                -> compatibility type for canonical Function artifact
 ```
 
 ---
 
-## 6. Non-goals
+## 8. Next migration boundary
+
+The next mandatory work is P8, not another semantic type expansion.
+
+```text
+current:
+RIBSection
+  ↓ compatibility projection
+BusinessInput / inherited Runtime
+  ↓
+product lifecycle
+
+next:
+RIBSection
+  ↓ native Runtime boundary
+interpretation / lifecycle
+```
+
+P8 must preserve already demonstrated invariants:
+
+```text
+same pre-update M_B for F/F'
+Boundary / Provenance recovery
+Authority separation
+staged Commitment / Promotion
+Canary isolation
+ActionLedger behavior
+Persistence safety
+observation-time determinism
+UNKNOWN / UNRESOLVED / NOT_EVALUATED separation
+```
+
+P9 then makes canonical RIB/mismatch state restart-durable. P10 remains the real-world acceptance gate.
+
+---
+
+## 9. Non-goals
 
 This migration does not claim to:
 
 - prove RDL v2.3;
 - model the complete set of real-world RIBs;
-- infer ξ contents;
-- replace Enterprise Authority / Ledger / Jira / Persistence mechanisms;
-- make a localhost single-writer runtime production-secure;
+- infer `ξ` contents;
+- replace Enterprise Authority / Ledger / Jira mechanisms merely for naming purity;
+- make a localhost single-writer Runtime production-secure;
 - turn test success into universal semantic validity.
-
----
-
-## 7. First implementation step
-
-The first code change should be non-destructive:
-
-1. add an explicit `RIBSection` type;
-2. add request and subsequent-observation acquisition functions;
-3. add a compatibility projection into the existing `BusinessInput` Cascade;
-4. test that `raw input != RIBSection` and that the finite Boundary / provenance are retained;
-5. only after that, route `EnterpriseRuntime.dispatch_ticket()` through the new section layer.
-
-This keeps the current working system inspectable while changing the semantic foundation underneath it.
