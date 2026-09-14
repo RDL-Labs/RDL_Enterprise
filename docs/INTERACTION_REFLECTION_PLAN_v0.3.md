@@ -1,6 +1,6 @@
 # Interaction Reflection Plan v0.3
 
-Status: **Core v2.3 migration in progress; RIB acquisition + mismatch shadow implemented, legacy metabolism not yet cut over.**  
+Status: **Core v2.3 staged migration: P1–P7 implemented; next mandatory boundary is native Runtime cutover (P8).**  
 Semantic reference: `Aporapeiron/RDL_Core` T0 BASE / SPEC v2.3.  
 Supersedes for current design: `INTERACTION_REFLECTION_PLAN_v0.2.md` (pre-v2.3 / EFP generation).
 
@@ -51,7 +51,7 @@ Function != M_B
 
 ## 2. Current migration implementation
 
-The current main branch now contains:
+The current main branch contains the following v2.3 migration surfaces.
 
 ```text
 src/rdl_enterprise/interaction.py
@@ -66,35 +66,60 @@ src/rdl_enterprise/mismatch_state.py
   InterpretationMismatchObservation
   UnresolvedMismatchState
   ObservationCoverageState
-  CoverageAdjustedThresholdPolicy
+
+src/rdl_enterprise/operational_h.py
+  V23OperationalHStateAdapter
+
+src/rdl_core/compiled_function_types.py
+  CompiledFunction
+
+src/rdl_core/conditional_compiled_function_types.py
+  ConditionalCompiledFunction
+  ConditionalFunctionPromotionRecord
+  ConditionalFunctionActivationRecord
 ```
 
-The bridge currently performs:
+The canonical bridge path is now:
 
 ```text
 raw BusinessInput
 → RIBSection(request)
 → compatibility projection
-→ legacy Runtime / Cascade
+→ existing Cascade
+→ F
 
 FeedbackResult / later observation
 → RIBSection(subsequent)
-→ same frozen interpretation context
-→ shadow F'
-→ shadow Δ(F,F')
-→ unresolved mismatch shadow H candidate
-
-coverage observations
-→ separate ObservationCoverageState
+→ same frozen pre-update M_B / interpretation context
+→ F'
+→ Δ(F,F')
+→ unresolved component only
+→ operational H
 ```
 
-This is **migration evidence**, not completion. The inherited Runtime still executes the pre-v2.3 `e_input` heat path and legacy threshold policy. Until cutover, product decisions must not treat the shadow state as the sole operational source.
+On `EnterpriseRuntimeRIBBridge`:
+
+```text
+legacy e_input                 -> diagnostic only
+coverage / missing / rejection -> Enterprise-local observation only
+canonical unresolved Δ(F,F')   -> operational H input
+coverage                        -/-> operational θ reduction
+```
+
+The parent `EnterpriseRuntime` lifecycle is still reused for product behavior, persistence, canary, promotion, and other compatibility mechanisms. Its historical `HState` shape and old names therefore remain compatibility surfaces. They are not the semantic source for the bridge's Core v2.3 H decision.
+
+This distinction is important:
+
+```text
+v2.3 bridge operational cutover = implemented
+native RIBSection Runtime        = not yet implemented
+```
 
 ---
 
 ## 3. Structural conflict
 
-The earlier proposal to add structural conflict directly to temporal `E` remains rejected.
+Structural conflict is not temporal Core mismatch.
 
 ```text
 StructuralConflict
@@ -102,7 +127,7 @@ StructuralConflict
 != Core H
 ```
 
-A structural conflict may influence selection, response, later interaction conditions, or inspection depth. It becomes relevant to Core mismatch only through a real later interaction section and the resulting `F / F'` comparison.
+A structural conflict may influence selection, response, later interaction conditions, or inspection depth. It becomes relevant to Core mismatch only through a later interaction section and the resulting `F / F'` comparison.
 
 ```text
 structural conflict observation
@@ -114,51 +139,79 @@ structural conflict observation
 → Δ(F,F')
 ```
 
-No conflict score, shadow score, priority score, or human-attention score may be added directly to Core H.
+No conflict score, priority score, coverage score, or human-attention score is added directly to Core H.
 
 ---
 
 ## 4. Delivery phases
 
-| Phase | Required work | Acceptance evidence |
+| Phase | Required work | Current state / acceptance evidence |
 | --- | --- | --- |
-| **P0** | Freeze Core v2.3 semantic baseline | Migration audit + coding principles reject new canonical EFP/xi-score/Function=M_B usage |
-| **P1** | Explicit request acquisition | raw `BusinessInput != RIBSection`; selected finite fields and Boundary/Provenance recoverable |
-| **P2** | Explicit later interaction acquisition | later observation forms a separate `RIBSection`; not identified with `FeedbackResult` itself |
-| **P3** | Same-M_B `F / F'` shadow comparison | subsequent section interpreted through frozen pre-update context; `Delta(F,F')` recorded separately |
-| **P4** | Separate H and coverage | unresolved mismatch state has no coverage/input term; coverage state has no `xi` API |
-| **P5** | Cut legacy `e_input → H` | operational reconstruction decisions no longer depend on acquisition gap as Core H |
-| **P6** | Remove observable-ξ semantics | legacy `xi_obs` becomes compatibility alias only; all current docs/code use coverage terminology |
-| **P7** | Function artifact migration | canonical `CompiledFunction / ActiveFunction` roles available; `CompiledMB` names compatibility-only |
-| **P8** | Runtime cutover | product Runtime uses RIBSection path natively rather than through compatibility projection |
-| **P9** | Persistence / restart durability | canonical RIB sections and v2.3 mismatch state survive process restart with provenance |
-| **P10** | Real interaction acceptance | one real structural-conflict → response → changed conditions → later RIB_B → F/F' → E chain observed end-to-end |
+| **P0** | Freeze Core v2.3 semantic baseline | **DONE** — current migration audit and coding principles reject canonical EFP / ξ-score / Function=M_B usage |
+| **P1** | Explicit request acquisition | **DONE** — raw `BusinessInput != RIBSection`; Boundary / provenance retained |
+| **P2** | Explicit later interaction acquisition | **DONE** — later observation forms separate subsequent `RIBSection` |
+| **P3** | Same-M_B `F / F'` comparison | **DONE** — later section interpreted through frozen pre-update context; `Δ(F,F')` recorded separately |
+| **P4** | Separate H and coverage | **DONE** — unresolved mismatch and coverage state are separate |
+| **P5** | Cut legacy `e_input → H` | **DONE on RIB bridge** — `e_input` remains observable but cannot drive operational H / M_Δ |
+| **P6** | Remove observable-ξ semantics | **DONE for current migration API** — `coverage_gap_score` is canonical; `xi_obs` is deprecated compatibility alias only |
+| **P7** | Function artifact migration | **DONE for public Core API** — `CompiledFunction / ActiveFunction / ConditionalCompiledFunction` and canonical conditional lifecycle are available; `*CompiledMB` remains compatibility-only |
+| **P8** | Runtime cutover | **OPEN** — remove the compatibility projection as the semantic execution dependency and let product Runtime consume RIB sections natively |
+| **P9** | Persistence / restart durability | **OPEN** — canonical RIB sections and v2.3 mismatch state must survive process restart as first-class persisted state |
+| **P10** | Real interaction acceptance | **PARTIAL / OPEN** — real-provider observations exist, but one complete structural-conflict → response → changed conditions → later RIB_B → F/F' → E chain remains to be observed end-to-end |
 
-P1–P4 may run in shadow beside legacy behavior before cutover. P5–P9 require regression tests proving that previously valid operational contracts remain intact or are explicitly replaced.
+Completion here means only that the declared migration contract is implemented and covered by the current finite test boundary. It does not imply universal correctness or completeness.
 
 ---
 
-## 5. Human Attention
+## 5. Function artifact migration boundary
+
+Current canonical lifecycle:
+
+```text
+StructureCandidate
+→ FunctionCandidate
+→ CompilationRecord(PASSED)
+→ CompiledFunction
+→ PromotionDecision
+→ ActiveFunction
+→ Deactivation / Recompilation / Supersession
+```
+
+Conditional lineage has a canonical path as well:
+
+```text
+ConditionalFunctionCandidate
+→ ConditionalCompiledFunction
+→ ConditionalFunctionPromotionRecord
+→ ConditionalFunctionActivationRecord
+→ ActiveFunction
+```
+
+Historical names remain callable during migration:
+
+```text
+CompiledMB
+ConditionalCompiledMB
+ActiveCompiledMB
+ConditionalPromotionRecord
+ConditionalActivationRecord
+```
+
+They are compatibility names, not evidence that `Function = M_B`.
+
+---
+
+## 6. Human Attention
 
 Observation is not notification. Conflict is not a review request. Core H is not human cognitive load.
 
 Human attention/review load remains a separate Enterprise-local quantity with its own Authority, deduplication, persistence, safety and aggregation rules.
 
-A review request may be triggered by:
-
-- explicit safety policy;
-- authority requirement;
-- repeated unresolved operational cases;
-- coverage failure;
-- provider failure;
-- durability break;
-- a Core `H >= θ` condition, if that condition is actually established.
-
-None of these causes are semantically identical.
+A review request may be triggered by explicit safety policy, authority requirement, repeated unresolved operational cases, coverage failure, provider failure, durability break, or an actually established `H >= θ` condition. These causes are not semantically identical.
 
 ---
 
-## 6. Timeout and missing later observation
+## 7. Timeout and missing later observation
 
 Timeout does **not** manufacture a later Core state.
 
@@ -170,26 +223,29 @@ F'(t+Δ)    = NOT_EVALUATED
 Core E     = NOT_ESTABLISHED
 ```
 
-Enterprise may still record:
-
-```text
-timeout
-provider availability
-retry count
-coverage gap
-human review eligibility
-operational risk
-```
-
-but these are not fabricated `E`, `H`, or `ξ`.
-
-The current legacy `CaseSnapshot.mark_unknown()` behavior is therefore migration debt and must be replaced before Runtime cutover.
+The canonical bridge timeout path records coverage / operational information without fabricating `F'`, `E`, `H`, or `ξ`. The inherited legacy timeout API remains available for compatibility, but the RIB bridge's operational H adapter prevents its synthetic legacy values from entering operational H.
 
 ---
 
-## 7. Evidence integrity
+## 8. Observation time and deterministic replay
 
-Existing synthetic cases remain synthetic. Development-authored priority labels, factor tables, expected outcomes, and benchmark fixtures are bounded hypotheses / test references, not collected operator truth.
+Meaning-affecting time is an explicit finite condition.
+
+`EnterpriseRuntime.dispatch_ticket()` now binds an explicit `BusinessInput.created_at` to `FrozenInterpretationContext.constraint_evaluation_time` when available. This prevents constraint freshness from silently depending on wall clock during deterministic Simulation / replay.
+
+```text
+observation time
+→ frozen interpretation condition
+→ F / F' comparison boundary
+```
+
+If no explicit observation time is supplied, the compatibility fallback may still use current time. The fallback is not treated as equivalent to a fixed replay condition.
+
+---
+
+## 9. Evidence integrity
+
+Synthetic cases remain synthetic. Development-authored priority labels, factor tables, expected outcomes, and benchmark fixtures are bounded hypotheses / test references, not collected operator truth.
 
 A deterministic replay or green test establishes only that no contract violation was observed inside the declared finite test Boundary.
 
@@ -202,24 +258,20 @@ bounded acceptance
 
 ---
 
-## 8. Stop rule
+## 10. Stop rule and next mandatory break
 
 Do not add new semantic primitives merely because the v2.3 vocabulary permits more modeling.
 
-Add or promote a new type only when it is necessary to:
+Add or promote a new type only when it is necessary to prevent a direct BASE / SPEC v2.3 violation, recover missing Boundary or Provenance, distinguish currently collapsed roles, inspect an observed operational break, or preserve an already demonstrated invariant during migration.
 
-- prevent a direct BASE / SPEC v2.3 violation;
-- recover missing Boundary or Provenance;
-- distinguish roles currently collapsed by implementation;
-- inspect an observed operational break;
-- preserve an already demonstrated operational invariant during migration.
-
-The next mandatory break to remove is:
+The next mandatory break is now:
 
 ```text
-legacy e_input / coverage
-        ↓
-legacy H / theta decision
+RIBSection
+   ↓
+compatibility projection to BusinessInput / inherited Runtime
+   ↓
+product lifecycle
 ```
 
-while preserving the existing frozen-`M_B`, provenance, Authority, persistence, and staged-commitment behavior.
+P8 should remove this projection as the semantic execution dependency while preserving the already demonstrated Authority, persistence, canary, staged commitment, frozen-`M_B`, provenance, and deterministic replay contracts.
