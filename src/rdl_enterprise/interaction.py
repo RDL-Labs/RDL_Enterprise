@@ -11,8 +11,8 @@ Canonical role:
         -> interp(M_B, RIBSection)
         -> F
 
-``RIBSection`` now exposes the small read-only attribute contract consumed by
-the existing Cascade, so canonical interpretation can use the section directly.
+``RIBSection`` exposes the small read-only attribute contract consumed by the
+existing Cascade, so canonical interpretation can use the section directly.
 ``to_business_input`` remains only for unmigrated product/lifecycle surfaces;
 it is not required to form canonical F or F'.
 """
@@ -29,12 +29,52 @@ from rdl_core import BoundaryContext, Provenance
 from .snapshot import BusinessInput, FeedbackResult
 
 
+def _plain_persistence_value(value: Any) -> Any:
+    """Return a pickle-safe plain representation of frozen finite values."""
+    if isinstance(value, Mapping):
+        return {key: _plain_persistence_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_plain_persistence_value(item) for item in value)
+    if isinstance(value, frozenset):
+        return {_plain_persistence_value(item) for item in value}
+    return value
+
+
+def _restore_rib_section(
+    section_id: str,
+    context_record: Tuple[Any, ...],
+    section_role: str,
+    payload: Mapping[str, Any],
+    projection_text: str,
+    source_refs: Tuple[str, ...],
+    provenance: Optional[Provenance],
+):
+    """Reconstruct a frozen section from its persistence-safe record."""
+    boundary_id, question, observation_time, purpose, conditions = context_record
+    context = BoundaryContext(
+        boundary_id=boundary_id,
+        question=question,
+        observation_time=observation_time,
+        purpose=purpose,
+        conditions=conditions,
+    )
+    return RIBSection(
+        section_id=section_id,
+        context=context,
+        section_role=section_role,
+        payload=payload,
+        projection_text=projection_text,
+        source_refs=source_refs,
+        provenance=provenance,
+    )
+
+
 @dataclass(frozen=True)
 class RIBSection:
     """One finite, uninterpreted interaction section under a declared Boundary.
 
     ``RIBSection`` is an Enterprise implementation representation of Core
-    ``RIB_B``.  It is *not* the relation network, not the complete set of RIBs,
+    ``RIB_B``. It is *not* the relation network, not the complete set of RIBs,
     and not an interpreted state ``F``.
 
     ``payload`` contains only fields selected for this finite section. Raw
@@ -72,6 +112,35 @@ class RIBSection:
         # opaque implementation data until a later adapter explicitly selects
         # them.
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
+
+    def __reduce__(self):
+        """Persist without serializing MappingProxyType implementation objects.
+
+        SQLiteCaseStore uses pickle at the Enterprise boundary.  Both this
+        payload and Core BoundaryContext.conditions are intentionally frozen by
+        MappingProxyType, which is not pickleable.  Persist a plain finite
+        record and reconstruct through the normal constructors so the frozen
+        invariants are restored after restart.
+        """
+        context_record = (
+            self.context.boundary_id,
+            self.context.question,
+            self.context.observation_time,
+            self.context.purpose,
+            _plain_persistence_value(self.context.conditions),
+        )
+        return (
+            _restore_rib_section,
+            (
+                self.section_id,
+                context_record,
+                self.section_role,
+                _plain_persistence_value(self.payload),
+                self.projection_text,
+                self.source_refs,
+                self.provenance,
+            ),
+        )
 
     @property
     def boundary_id(self) -> str:
