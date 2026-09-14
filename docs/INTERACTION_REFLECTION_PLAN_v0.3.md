@@ -1,6 +1,6 @@
 # Interaction Reflection Plan v0.3
 
-Status: **Core v2.3 staged migration: P1–P8 implemented; next mandatory boundary is restart durability of canonical v2.3 state (P9).**  
+Status: **Core v2.3 staged migration: P1–P9 implemented; remaining mandatory boundary is real interaction acceptance (P10).**  
 Semantic reference: `Aporapeiron/RDL_Core` T0 BASE / SPEC v2.3.  
 Supersedes for current design: `INTERACTION_REFLECTION_PLAN_v0.2.md` (pre-v2.3 / EFP generation).
 
@@ -51,7 +51,7 @@ Function != M_B
 
 ## 2. Current migration implementation
 
-The current main branch contains the following v2.3 migration surfaces.
+The current main branch contains these v2.3 migration surfaces:
 
 ```text
 src/rdl_enterprise/interaction.py
@@ -79,13 +79,13 @@ src/rdl_core/conditional_compiled_function_types.py
   ConditionalFunctionActivationRecord
 ```
 
-The canonical bridge path is now:
+The canonical path is now:
 
 ```text
 raw BusinessInput
 → acquisition under B
 → RIBSection(request)
-→ existing Cascade through the RIBSection read contract
+→ direct interpretation through the RIBSection read contract
 → F
 
 FeedbackResult / later observation
@@ -98,7 +98,7 @@ FeedbackResult / later observation
 → operational H
 ```
 
-Canonical `F / F'` formation no longer depends on `RIBSection.to_business_input()`. That adapter remains only for historical / compatibility surfaces that have not yet been renamed.
+Canonical `F / F'` formation does not depend on `RIBSection.to_business_input()`. That adapter remains only for historical / compatibility surfaces.
 
 On `EnterpriseRuntimeRIBBridge`:
 
@@ -109,19 +109,42 @@ canonical unresolved Δ(F,F')   -> operational H input
 coverage                        -/-> operational θ reduction
 ```
 
-The parent `EnterpriseRuntime` lifecycle is still reused for product behavior, persistence, canary, promotion, ledger, snapshot and other compatibility mechanisms. Historical field names therefore remain in some internals, but they no longer define the canonical interpretation input on the RIB bridge.
+---
 
-This distinction is important:
+## 3. Restart durability
+
+The bridge persists the canonical v2.3 inspection boundary through the current single-writer SQLite Runtime.
 
 ```text
-native RIBSection interpretation for F/F' = implemented
-all historical Runtime names removed       = not required for P8
-canonical restart durability               = P9 inspection target
+request RIBSection
++ frozen interpretation boundary
++ subsequent RIBSection
++ F / F'
++ mismatch observation
++ unresolved-mismatch state
++ coverage state
++ operational H adapter state
+        ↓ persist
+      SQLite
+        ↓ restart
+recover the same bounded roles
 ```
+
+Timeout remains distinct:
+
+```text
+later RIBSection unavailable
+→ F' NOT_EVALUATED
+→ Core E NOT_ESTABLISHED
+→ no fabricated H
+→ coverage may still be recorded and persisted
+```
+
+This is bounded restart durability, not distributed or tamper-proof persistence.
 
 ---
 
-## 3. Structural conflict
+## 4. Structural conflict
 
 Structural conflict is not temporal Core mismatch.
 
@@ -147,27 +170,27 @@ No conflict score, priority score, coverage score, or human-attention score is a
 
 ---
 
-## 4. Delivery phases
+## 5. Delivery phases
 
 | Phase | Required work | Current state / acceptance evidence |
 | --- | --- | --- |
-| **P0** | Freeze Core v2.3 semantic baseline | **DONE** — current migration audit and coding principles reject canonical EFP / ξ-score / Function=M_B usage |
-| **P1** | Explicit request acquisition | **DONE** — raw `BusinessInput != RIBSection`; Boundary / provenance retained |
-| **P2** | Explicit later interaction acquisition | **DONE** — later observation forms separate subsequent `RIBSection` |
-| **P3** | Same-M_B `F / F'` comparison | **DONE** — later section interpreted through frozen pre-update context; `Δ(F,F')` recorded separately |
-| **P4** | Separate H and coverage | **DONE** — unresolved mismatch and coverage state are separate |
-| **P5** | Cut legacy `e_input → H` | **DONE on RIB bridge** — `e_input` remains observable but cannot drive operational H / M_Δ |
-| **P6** | Remove observable-ξ semantics | **DONE for current migration API** — `coverage_gap_score` is canonical; `xi_obs` is deprecated compatibility alias only |
-| **P7** | Function artifact migration | **DONE for public Core API** — canonical Function artifacts and conditional lifecycle are available; `*CompiledMB` remains compatibility-only |
-| **P8** | Runtime cutover | **DONE on RIB bridge** — both initial `F` and canonical `F'` consume `RIBSection` directly; tests fail if `to_business_input()` is required by the canonical path |
-| **P9** | Persistence / restart durability | **IN PROGRESS** — `RIBSection` is pickle/restart-safe and a pending request can be restored and continued into a later section; full canonical mismatch/coverage/H restart contract remains to be pinned |
-| **P10** | Real interaction acceptance | **PARTIAL / OPEN** — real-provider observations exist, but one complete structural-conflict → response → changed conditions → later RIB_B → F/F' → E chain remains to be observed end-to-end |
+| **P0** | Freeze Core v2.3 semantic baseline | **DONE** |
+| **P1** | Explicit request acquisition | **DONE** |
+| **P2** | Explicit later interaction acquisition | **DONE** |
+| **P3** | Same-M_B `F / F'` comparison | **DONE** |
+| **P4** | Separate H and coverage | **DONE** |
+| **P5** | Cut legacy `e_input → H` | **DONE on RIB bridge** |
+| **P6** | Remove observable-ξ semantics | **DONE for current migration API** |
+| **P7** | Function artifact migration | **DONE for public Core API** |
+| **P8** | Runtime cutover | **DONE on RIB bridge** — canonical initial `F` and later `F'` consume `RIBSection` directly |
+| **P9** | Persistence / restart durability | **DONE for current SQLite Runtime boundary** — canonical RIB/mismatch/coverage/H state survives restart |
+| **P10** | Real interaction acceptance | **PARTIAL / OPEN** — canonical live Jira read path exists; one changed-condition end-to-end chain remains to be observed |
 
 Completion here means only that the declared migration contract is implemented and covered by the current finite test boundary. It does not imply universal correctness or completeness.
 
 ---
 
-## 5. Function artifact migration boundary
+## 6. Function artifact migration boundary
 
 Current canonical lifecycle:
 
@@ -181,7 +204,7 @@ StructureCandidate
 → Deactivation / Recompilation / Supersession
 ```
 
-Conditional lineage has a canonical path as well:
+Conditional lineage:
 
 ```text
 ConditionalFunctionCandidate
@@ -205,7 +228,7 @@ They are compatibility names, not evidence that `Function = M_B`.
 
 ---
 
-## 6. Human Attention
+## 7. Human Attention
 
 Observation is not notification. Conflict is not a review request. Core H is not human cognitive load.
 
@@ -215,27 +238,11 @@ A review request may be triggered by explicit safety policy, authority requireme
 
 ---
 
-## 7. Timeout and missing later observation
-
-Timeout does **not** manufacture a later Core state.
-
-If no adequate later interaction section can be formed:
-
-```text
-RIB_B(t+Δ) = NOT_EVALUATED / unavailable
-F'(t+Δ)    = NOT_EVALUATED
-Core E     = NOT_ESTABLISHED
-```
-
-The canonical bridge timeout path records coverage / operational information without fabricating `F'`, `E`, `H`, or `ξ`. The inherited legacy timeout API remains available for compatibility, but the RIB bridge's operational H adapter prevents its synthetic legacy values from entering operational H.
-
----
-
 ## 8. Observation time and deterministic replay
 
 Meaning-affecting time is an explicit finite condition.
 
-`EnterpriseRuntime.dispatch_ticket()` binds an explicit request observation time to `FrozenInterpretationContext.constraint_evaluation_time` when available. Because the RIB bridge now passes `RIBSection` directly, its `created_at` read contract exposes the acquired observation time without reintroducing wall clock.
+Explicit request observation time is bound to `FrozenInterpretationContext.constraint_evaluation_time`. Because the RIB bridge passes `RIBSection` directly, its `created_at` read contract exposes the acquired observation time without reintroducing wall clock.
 
 ```text
 observation time
@@ -247,13 +254,17 @@ Compatibility surfaces may still have wall-clock fallbacks when no observation t
 
 ---
 
-## 9. Evidence integrity
+## 9. Acceptance evidence
 
-Synthetic cases remain synthetic. Development-authored priority labels, factor tables, expected outcomes, and benchmark fixtures are bounded hypotheses / test references, not collected operator truth.
+The P9 acceptance run at commit `f102917c5bf1ddaaca2d58d65667bdb5ddbfa8f8` completed with:
 
-A deterministic replay or green test establishes only that no contract violation was observed inside the declared finite test Boundary.
+```text
+314 passed
+4 skipped
+6 subtests passed
+```
 
-The P8 cutover acceptance run at commit `36cd67aba105d4f2120b1ee8ac473c1b6a9c4377` completed with `312 passed, 4 skipped, 6 subtests passed`. This is bounded regression evidence, not a proof of RDL or universal Runtime correctness.
+The skipped tests include live-provider acceptance when credentials are not configured. Green tests establish only bounded contract evidence.
 
 ```text
 bounded acceptance
@@ -264,31 +275,35 @@ bounded acceptance
 
 ---
 
-## 10. Stop rule and next mandatory break
+## 10. P10 — remaining mandatory break
 
-Do not add new semantic primitives merely because the v2.3 vocabulary permits more modeling.
-
-Add or promote a new type only when it is necessary to prevent a direct BASE / SPEC v2.3 violation, recover missing Boundary or Provenance, distinguish currently collapsed roles, inspect an observed operational break, or preserve an already demonstrated invariant during migration.
-
-P8 removed this semantic dependency:
+The live Jira test now targets the canonical v2.3 path:
 
 ```text
-RIBSection
-   ↓
-to_business_input()
-   ↓
-F / F'
+real Jira observation
+→ request RIBSection
+→ F
+→ later real Jira observation
+→ subsequent RIBSection
+→ same frozen pre-update M_B
+→ F'
+→ canonical Δ(F,F')
+→ unresolved H when applicable
 ```
 
-The next mandatory break is P9:
+Because the test is read-only, two immediate observations may legitimately be identical. That gives real-provider evidence but does not establish a changed-condition chain.
+
+The remaining P10 gate is:
 
 ```text
-canonical request RIBSection
-+ frozen interpretation boundary
-+ subsequent RIBSection
-+ canonical mismatch / unresolved-H state
-        ↓ persist / restart
-recover the same finite roles and lineage
+real structural conflict / actionable condition
+→ actual response or action
+→ changed external interaction conditions
+→ later real RIB_B
+→ same frozen pre-update M_B
+→ F'
+→ E
+→ unresolved H when applicable
 ```
 
-The next work should pin exactly which canonical v2.3 states must survive restart, without treating persistence as Truth or claiming complete system state.
+P10 should be closed only after one such bounded chain is observed end-to-end with recoverable Boundary and Provenance. Do not manufacture the external change merely to make the test pass.
