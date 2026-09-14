@@ -7,6 +7,8 @@ from rdl_core import (
     CompiledMB,
     ConditionalCompiledFunction,
     ConditionalCompiledMB,
+    ConditionalFunctionActivationRecord,
+    ConditionalFunctionPromotionRecord,
     ConditionalRuptureStatus,
     ConditionalValidationStatus,
     DeactivationStatus,
@@ -17,11 +19,13 @@ from rdl_core import (
     RuptureObservationStatus,
     StructureCandidate,
     activate_compiled_replacement,
+    activate_conditional_function_promotion,
     activate_promoted_artifact,
     build_conditional_relation_candidate,
     compile_function_candidate,
     compile_lineage_preserving_conditional_candidate,
     derive_relation_pattern,
+    evaluate_conditional_function_promotion,
     evaluate_promotion,
     materialize_compiled_replacement,
     materialize_conditional_compiled_artifact,
@@ -34,12 +38,6 @@ from rdl_core import (
     record_rupture_observation,
     record_supersession,
     request_recompilation,
-)
-from rdl_core.conditional_compiled_function_types import (
-    ConditionalFunctionActivationRecord,
-    ConditionalFunctionPromotionRecord,
-    activate_conditional_function_promotion,
-    evaluate_conditional_function_promotion,
 )
 
 
@@ -119,7 +117,6 @@ def test_compiled_function_is_canonical_active_lifecycle_artifact():
     assert isinstance(artifact, CompiledFunction)
     assert isinstance(active, ActiveFunction)
     assert active.artifact is artifact
-    # Historical name is a compatibility alias, not a second semantic kind.
     assert ActiveCompiledMB is ActiveFunction
 
     deactivation = record_deactivation(
