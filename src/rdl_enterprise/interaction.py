@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 from rdl_core import BoundaryContext, Provenance
 
@@ -116,9 +116,9 @@ class RIBSection:
     def __reduce__(self):
         """Persist without serializing MappingProxyType implementation objects.
 
-        SQLiteCaseStore uses pickle at the Enterprise boundary.  Both this
+        SQLiteCaseStore uses pickle at the Enterprise boundary. Both this
         payload and Core BoundaryContext.conditions are intentionally frozen by
-        MappingProxyType, which is not pickleable.  Persist a plain finite
+        MappingProxyType, which is not pickleable. Persist a plain finite
         record and reconstruct through the normal constructors so the frozen
         invariants are restored after restart.
         """
@@ -152,9 +152,9 @@ class RIBSection:
         return value if isinstance(value, str) and value else None
 
     @property
-    def ticket_id(self) -> Optional[str]:
+    def ticket_id(self) -> str:
         value = self.payload.get("ticket_id")
-        return value if isinstance(value, str) and value else None
+        return value if isinstance(value, str) and value else self.section_id
 
     @property
     def user_id(self) -> str:
@@ -227,7 +227,7 @@ class RIBSection:
         """
 
         return BusinessInput(
-            ticket_id=self.ticket_id or self.section_id,
+            ticket_id=self.ticket_id,
             user_id=self.user_id,
             category=self.category,
             query_text=self.query_text,
@@ -287,7 +287,7 @@ def acquire_request_rib_section(
 
 
 def acquire_feedback_rib_section(
-    request: BusinessInput,
+    request: Union[BusinessInput, RIBSection],
     feedback: FeedbackResult,
     *,
     context: Optional[BoundaryContext] = None,
@@ -295,20 +295,25 @@ def acquire_feedback_rib_section(
 ) -> RIBSection:
     """Acquire a later finite section from feedback / subsequent observation.
 
+    The earlier request may be the raw ``BusinessInput`` or the already
+    acquired request-side ``RIBSection``. This allows restart recovery to
+    continue from the persisted canonical section without recreating raw input.
+
     The returned section is not ``ξ`` and does not imply a Core mismatch by
     itself. Core ``E`` exists only after this section is interpreted by the
     same pre-update ``M_B`` and compared with the earlier ``F``.
     """
 
-    if not isinstance(request, BusinessInput):
-        raise TypeError("request must be BusinessInput")
+    if not isinstance(request, (BusinessInput, RIBSection)):
+        raise TypeError("request must be BusinessInput or RIBSection")
     if not isinstance(feedback, FeedbackResult):
         raise TypeError("feedback must be FeedbackResult")
 
+    request_ticket_id = request.ticket_id
     observed_at = feedback.observed_at
     if context is None:
         context = BoundaryContext(
-            boundary_id=f"enterprise.feedback:{request.ticket_id}",
+            boundary_id=f"enterprise.feedback:{request_ticket_id}",
             question=request.query_text,
             observation_time=observed_at,
             purpose="subsequent_interaction_interpretation",
@@ -326,10 +331,10 @@ def acquire_feedback_rib_section(
         )
 
     payload = {
-        "ticket_id": f"{request.ticket_id}:subsequent",
+        "ticket_id": f"{request_ticket_id}:subsequent",
         "user_id": request.user_id,
         "category": request.category,
-        "original_ticket_id": request.ticket_id,
+        "original_ticket_id": request_ticket_id,
         "original_query": request.query_text,
         "user_resolved": feedback.user_resolved,
         "human_approved": feedback.human_approved,
@@ -357,15 +362,20 @@ def acquire_feedback_rib_section(
     if feedback.feedback_comment:
         text_components.append(f"【フィードバック】{feedback.feedback_comment}")
 
+    source_ref = (
+        f"rib_section:{request.section_id}"
+        if isinstance(request, RIBSection)
+        else f"business_input:{request_ticket_id}"
+    )
     return RIBSection(
-        section_id=f"rib:{request.ticket_id}:subsequent",
+        section_id=f"rib:{request_ticket_id}:subsequent",
         context=context,
         section_role="subsequent_observation",
         payload=payload,
         projection_text="\n".join(text_components),
         source_refs=(
-            f"business_input:{request.ticket_id}",
-            f"feedback:{request.ticket_id}",
+            source_ref,
+            f"feedback:{request_ticket_id}",
         ),
         provenance=provenance,
     )

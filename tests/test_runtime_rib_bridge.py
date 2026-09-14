@@ -40,7 +40,7 @@ class DirectSectionLLMBridge:
         }
 
 
-def test_runtime_bridge_acquires_request_section_before_legacy_interpretation():
+def test_runtime_bridge_acquires_request_section_before_canonical_interpretation():
     runtime = EnterpriseRuntimeRIBBridge()
     raw = BusinessInput(
         "BRIDGE-1",
@@ -53,16 +53,17 @@ def test_runtime_bridge_acquires_request_section_before_legacy_interpretation():
     result = runtime.dispatch_ticket(raw)
     snapshot = runtime.pending_snapshots[result.ticket_id]
 
-    assert runtime.migration_stage == "P8_SUBSEQUENT_RIB_DIRECT_INTERPRETATION"
+    assert runtime.migration_stage == "P8_RIB_DIRECT_INTERPRETATION"
     assert isinstance(runtime.h_state, V23OperationalHStateAdapter)
     assert isinstance(snapshot.rib_section, RIBSection)
+    assert isinstance(snapshot.efp, RIBSection)
+    assert snapshot.efp is snapshot.rib_section
     assert snapshot.raw_business_input is raw
     assert snapshot.rib_section.section_role == "request_observation"
     assert snapshot.rib_section.context.purpose == "business_request_interpretation"
-    assert snapshot.efp is not raw
     assert snapshot.efp.metadata["rib_section_id"] == snapshot.rib_section.section_id
     assert snapshot.efp.metadata["interaction_series_id"] == "bridge-series"
-    assert snapshot.interaction_semantic_version == "core-v2.3-rib-p8-subsequent-direct"
+    assert snapshot.interaction_semantic_version == "core-v2.3-rib-p8-direct"
 
 
 def test_request_rib_section_is_directly_interpretable_without_projection():
@@ -104,7 +105,7 @@ def test_request_rib_section_is_directly_interpretable_without_projection():
     assert direct.constraint_locus_ids == projected.constraint_locus_ids
 
 
-def test_subsequent_canonical_f_prime_receives_rib_section_not_projection():
+def test_initial_and_subsequent_canonical_interpretation_receive_rib_sections():
     runtime = EnterpriseRuntimeRIBBridge(llm_bridge=DirectSectionLLMBridge())
     raw = BusinessInput(
         "BRIDGE-DIRECT-SUBSEQUENT",
@@ -114,6 +115,10 @@ def test_subsequent_canonical_f_prime_receives_rib_section_not_projection():
         created_at="2026-09-14T10:05:00+00:00",
     )
     runtime.dispatch_ticket(raw)
+    pending = runtime.pending_snapshots[raw.ticket_id]
+
+    assert pending.f_pred.content == "direct-rib-section"
+    assert isinstance(pending.efp, RIBSection)
 
     runtime.resolve_ticket_feedback(
         raw.ticket_id,
@@ -129,10 +134,77 @@ def test_subsequent_canonical_f_prime_receives_rib_section_not_projection():
     assert snapshot.rib_section_next.is_prime
     assert snapshot.rib_section_next.metadata["is_efp_prime"] is True
     assert snapshot.v23_f_prime.content == "direct-rib-section"
-    # Initial product dispatch still crosses the explicit P8 compatibility boundary.
-    assert snapshot.f_pred.content == "projected-business-input"
     assert snapshot.v23_mismatch is not None
     assert snapshot.v23_mismatch.value > 0.0
+
+
+def test_p8_canonical_path_does_not_call_business_input_projection(monkeypatch):
+    def forbidden_projection(self):
+        raise AssertionError("canonical F/F' must not project RIBSection to BusinessInput")
+
+    monkeypatch.setattr(RIBSection, "to_business_input", forbidden_projection)
+    runtime = EnterpriseRuntimeRIBBridge(llm_bridge=DirectSectionLLMBridge())
+    raw = BusinessInput(
+        "BRIDGE-PROJECTION-BLOCK",
+        "operator",
+        "workflow",
+        "inspect state",
+        created_at="2026-09-14T10:10:00+00:00",
+    )
+
+    runtime.dispatch_ticket(raw)
+    runtime.resolve_ticket_feedback(
+        raw.ticket_id,
+        FeedbackResult(
+            user_resolved=False,
+            feedback_comment="still unresolved",
+            observed_at="2026-09-14T10:11:00+00:00",
+        ),
+    )
+
+    snapshot = runtime.resolved_snapshots[-1]
+    assert snapshot.f_pred.content == "direct-rib-section"
+    assert snapshot.v23_f_prime.content == "direct-rib-section"
+
+
+def test_p8_request_rib_section_survives_restart_and_forms_later_section(tmp_path):
+    store_path = str(tmp_path / "p8-rib-runtime.sqlite3")
+    runtime = EnterpriseRuntimeRIBBridge(
+        store_path=store_path,
+        llm_bridge=DirectSectionLLMBridge(),
+    )
+    raw = BusinessInput(
+        "BRIDGE-P8-RESTART",
+        "operator",
+        "workflow",
+        "inspect state",
+        metadata={"interaction_series_id": "restart-series"},
+        created_at="2026-09-14T10:15:00+00:00",
+    )
+    runtime.dispatch_ticket(raw)
+
+    restarted = EnterpriseRuntimeRIBBridge(
+        store_path=store_path,
+        llm_bridge=DirectSectionLLMBridge(),
+    )
+    snapshot = restarted.pending_snapshots[raw.ticket_id]
+    assert isinstance(snapshot.efp, RIBSection)
+    assert snapshot.efp.section_role == "request_observation"
+    assert snapshot.efp.provenance is not None
+    assert snapshot.efp.metadata["interaction_series_id"] == "restart-series"
+
+    restarted.resolve_ticket_feedback(
+        raw.ticket_id,
+        FeedbackResult(
+            user_resolved=False,
+            feedback_comment="restart observation",
+            observed_at="2026-09-14T10:16:00+00:00",
+        ),
+    )
+    resolved = restarted.resolved_snapshots[-1]
+    assert isinstance(resolved.rib_section_next, RIBSection)
+    assert resolved.rib_section_next.section_role == "subsequent_observation"
+    assert resolved.v23_f_prime is not None
 
 
 def test_runtime_bridge_acquires_subsequent_section_and_records_separate_v23_states():
