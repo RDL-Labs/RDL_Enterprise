@@ -76,9 +76,13 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
     """
 
     migration_stage = "P8_RIB_DIRECT_INTERPRETATION"
+    persistence_stage = "P9_CANONICAL_RIB_STATE_RESTART"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+
+        persisted_state = self.case_store.load_runtime_state() if self.case_store else None
+        persisted_state = persisted_state if isinstance(persisted_state, dict) else {}
 
         loaded_h_state = self.h_state
         theta = float(getattr(loaded_h_state, "theta_0", 2.0))
@@ -97,10 +101,43 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
             self.h_state = V23OperationalHStateAdapter(theta_0=theta, gamma=gamma)
             self.operational_h_migration_reset = True
 
-        # Independent audit/shadow state: useful for comparing the explicit
-        # unresolved-mismatch model with the legacy-compatible operational API.
-        self.v23_h_state = UnresolvedMismatchState(theta=theta, gamma=gamma)
-        self.v23_coverage = ObservationCoverageState()
+        # These are explicit v2.3 audit/inspection states, separate from the
+        # operational compatibility adapter. Preserve them across restart when
+        # they were written by a previous bridge instance.
+        restored_h = persisted_state.get("v23_h_state")
+        self.v23_h_state = (
+            restored_h
+            if isinstance(restored_h, UnresolvedMismatchState)
+            else UnresolvedMismatchState(theta=theta, gamma=gamma)
+        )
+        restored_coverage = persisted_state.get("v23_coverage")
+        self.v23_coverage = (
+            restored_coverage
+            if isinstance(restored_coverage, ObservationCoverageState)
+            else ObservationCoverageState()
+        )
+
+    def _persist_runtime_state(self) -> None:
+        """Persist base Runtime state plus canonical v2.3 bridge extensions.
+
+        The parent Runtime owns the compatibility persistence payload. This
+        bridge appends two role-separated states without reinterpreting either
+        as Truth or complete system state.
+        """
+
+        super()._persist_runtime_state()
+        if not self.case_store:
+            return
+        if not hasattr(self, "v23_h_state") or not hasattr(self, "v23_coverage"):
+            # Defensive guard for any superclass initialization path that might
+            # persist before bridge-specific state exists.
+            return
+        state = self.case_store.load_runtime_state()
+        if not isinstance(state, dict):
+            state = {}
+        state["v23_h_state"] = self.v23_h_state
+        state["v23_coverage"] = self.v23_coverage
+        self.case_store.save_runtime_state(state)
 
     def dispatch_ticket(
         self,
@@ -254,6 +291,14 @@ class EnterpriseRuntimeRIBBridge(EnterpriseRuntime):
                 self.h_state.w_input,
             )
             resolved.v23_coverage_gap_score = self.v23_coverage.coverage_gap_score()
+
+            # Parent commit_transition occurs before the bridge records these
+            # v2.3 inspection states. Re-save the bounded resolved snapshot and
+            # bridge extension state so a normal process restart continues from
+            # the same finite inspection boundary.
+            if self.case_store:
+                self.case_store.save_case(ticket_id, resolved, resolved.status.value)
+                self._persist_runtime_state()
 
         return result
 
