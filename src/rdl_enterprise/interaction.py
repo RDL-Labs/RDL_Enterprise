@@ -11,9 +11,10 @@ Canonical role:
         -> interp(M_B, RIBSection)
         -> F
 
-The existing Cascade still consumes ``BusinessInput``.  ``to_business_input``
-is therefore a compatibility projection, not a claim that raw BusinessInput
-and RIB_B are identical.
+``RIBSection`` now exposes the small read-only attribute contract consumed by
+the existing Cascade, so canonical interpretation can use the section directly.
+``to_business_input`` remains only for unmigrated product/lifecycle surfaces;
+it is not required to form canonical F or F'.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from rdl_core import BoundaryContext, Provenance
 
@@ -36,9 +37,13 @@ class RIBSection:
     ``RIB_B``.  It is *not* the relation network, not the complete set of RIBs,
     and not an interpreted state ``F``.
 
-    ``payload`` contains only fields selected for this finite section.  Raw
+    ``payload`` contains only fields selected for this finite section. Raw
     provider/world state may be broader and must not be silently promoted into
     the section.
+
+    The compatibility-shaped properties below are views over this finite
+    section. They do not reconstruct a raw ``BusinessInput`` and do not change
+    the section's identity or payload.
     """
 
     section_id: str
@@ -82,18 +87,46 @@ class RIBSection:
         value = self.payload.get("ticket_id")
         return value if isinstance(value, str) and value else None
 
-    def to_business_input(self) -> BusinessInput:
-        """Project this finite section into the legacy Cascade input contract.
+    @property
+    def user_id(self) -> str:
+        value = self.payload.get("user_id")
+        return value if isinstance(value, str) and value else "interaction-section"
 
-        This method is a migration adapter only.  Callers must not infer
-        ``BusinessInput == RIB_B`` from its existence.
+    @property
+    def query_text(self) -> str:
+        """Finite text view consumed by the current interpretation cascade."""
+        return self.projection_text
+
+    @property
+    def created_at(self) -> str:
+        """Recover the section observation time without introducing wall time."""
+        value = (
+            self.context.observation_time
+            or self.payload.get("created_at")
+            or self.payload.get("observed_at")
+        )
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+        return str(value)
+
+    @property
+    def is_prime(self) -> bool:
+        """Legacy Cascade hint for a later interaction section."""
+        return self.section_role == "subsequent_observation"
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Detached finite metadata view for the current Cascade contract.
+
+        The returned dict is rebuilt on every access. Mutating it cannot mutate
+        the frozen RIB section. Fields with old names exist only because the
+        inherited Cascade still reads them while P8 removes that dependency.
         """
-
-        ticket_id = self.ticket_id or self.section_id
-        user_id = self.payload.get("user_id")
-        if not isinstance(user_id, str) or not user_id:
-            user_id = "interaction-section"
-        metadata = {
+        metadata: Dict[str, Any] = {
             "rib_section_id": self.section_id,
             "rib_section_role": self.section_role,
             "rib_boundary_id": self.context.boundary_id,
@@ -102,17 +135,35 @@ class RIBSection:
         interaction_series_id = self.payload.get("interaction_series_id")
         if isinstance(interaction_series_id, str) and interaction_series_id:
             metadata["interaction_series_id"] = interaction_series_id
+        if self.is_prime:
+            metadata.update({
+                "is_efp_prime": True,
+                "original_query": self.payload.get("original_query"),
+                "user_resolved": self.payload.get("user_resolved", True),
+                "human_approved": self.payload.get("human_approved", False),
+                "human_rejected": self.payload.get("human_rejected", False),
+                "actual_response_text": self.payload.get("actual_response_text"),
+                "feedback_comment": self.payload.get("feedback_comment"),
+                "new_knowledge_provided": self.payload.get("new_knowledge_provided"),
+                "correction_content": self.payload.get("correction_content"),
+            })
+        return metadata
+
+    def to_business_input(self) -> BusinessInput:
+        """Project this section into the legacy product/lifecycle input type.
+
+        This is a compatibility adapter only. Canonical interpretation may pass
+        ``RIBSection`` directly to the Cascade. Callers must not infer
+        ``BusinessInput == RIB_B`` from this adapter's existence.
+        """
+
         return BusinessInput(
-            ticket_id=ticket_id,
-            user_id=user_id,
+            ticket_id=self.ticket_id or self.section_id,
+            user_id=self.user_id,
             category=self.category,
-            query_text=self.projection_text,
-            metadata=metadata,
-            created_at=(
-                self.context.observation_time
-                or self.payload.get("created_at")
-                or datetime.utcnow().isoformat()
-            ),
+            query_text=self.query_text,
+            metadata=self.metadata,
+            created_at=self.created_at or datetime.utcnow().isoformat(),
         )
 
 
@@ -176,7 +227,7 @@ def acquire_feedback_rib_section(
     """Acquire a later finite section from feedback / subsequent observation.
 
     The returned section is not ``ξ`` and does not imply a Core mismatch by
-    itself.  Core ``E`` exists only after this section is interpreted by the
+    itself. Core ``E`` exists only after this section is interpreted by the
     same pre-update ``M_B`` and compared with the earlier ``F``.
     """
 
