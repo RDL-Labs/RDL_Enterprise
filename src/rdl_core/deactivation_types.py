@@ -1,10 +1,10 @@
-"""Explicit deactivation records for active Compiled M_B artifacts."""
+"""Explicit deactivation records for active Function artifacts."""
 
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from .activation_types import ActiveCompiledMB
+from .activation_types import ActiveFunction
 from .contracts import BoundaryContext, Provenance
 from .function_types import FunctionDescription
 
@@ -19,7 +19,7 @@ class DeactivationStatus(str, Enum):
 class DeactivationRecord:
     """A bounded lifecycle record; it does not erase prior activation history."""
 
-    active: ActiveCompiledMB
+    active: ActiveFunction
     status: DeactivationStatus
     context: BoundaryContext
     evaluator: FunctionDescription
@@ -34,7 +34,7 @@ class DeactivationRecord:
 
 
 def record_deactivation(
-    active: ActiveCompiledMB,
+    active: ActiveFunction,
     status: DeactivationStatus,
     context: BoundaryContext,
     *,
@@ -42,7 +42,7 @@ def record_deactivation(
     evaluator: FunctionDescription = FunctionDescription("rdl_core.deactivation_policy", "0"),
     provenance: Optional[Provenance] = None,
 ) -> DeactivationRecord:
-    """Record a lifecycle decision without mutating the active artifact."""
+    """Record a lifecycle decision without mutating the active Function."""
     return DeactivationRecord(
         active, status, context, evaluator, reason=reason, provenance=provenance,
     )
