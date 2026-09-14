@@ -1,11 +1,16 @@
-"""Explicit promotion decisions for validated Compiled M_B artifacts."""
+"""Explicit promotion decisions for validated Function artifacts.
+
+Core v2.3 treats the promoted artifact as a compiled Function, not as ``M_B``
+itself.  The legacy ``CompiledMB`` shape is still accepted through
+``CompiledFunctionArtifact`` during migration.
+"""
 
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Tuple
 
+from .compiled_function_types import CompiledFunctionArtifact
 from .contracts import BoundaryContext, Provenance
-from .evolution_types import CompiledMB
 from .function_types import FunctionDescription
 from .rupture_types import RuptureObservation, RuptureObservationStatus
 
@@ -31,9 +36,9 @@ class PromotionPolicyDescription:
 
 @dataclass(frozen=True)
 class PromotionDecision:
-    """Decision record; approval does not mutate or activate the artifact."""
+    """Decision record; approval does not mutate or activate the Function artifact."""
 
-    artifact: CompiledMB
+    artifact: CompiledFunctionArtifact
     status: PromotionDecisionStatus
     policy: FunctionDescription
     context: BoundaryContext
@@ -61,7 +66,7 @@ class PromotionDecision:
 
 
 def evaluate_promotion(
-    artifact: CompiledMB,
+    artifact: CompiledFunctionArtifact,
     context: BoundaryContext,
     *,
     ruptures: Tuple[RuptureObservation, ...] = (),
@@ -70,7 +75,7 @@ def evaluate_promotion(
     policy: FunctionDescription = FunctionDescription("rdl_core.promotion_policy", "0"),
     provenance: Optional[Provenance] = None,
 ) -> PromotionDecision:
-    """Evaluate a promotion gate without activating the Compiled M_B."""
+    """Evaluate a promotion gate without activating the compiled Function."""
     if policy_description is not None:
         if policy != policy_description.function:
             raise ValueError("policyとpolicy_descriptionが一致していません")
