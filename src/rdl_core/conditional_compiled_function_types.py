@@ -1,15 +1,19 @@
-"""Canonical conditional compiled Function artifacts.
+"""Canonical conditional compiled Function artifacts and lifecycle wrappers.
 
-``ConditionalCompiledMB`` is retained in ``evolution_types`` for compatibility.
-This module gives the same bounded conditional lineage a Function-correct name
-without changing the historical serialized shape in one step.
+``ConditionalCompiledMB`` and its lifecycle records remain in
+``evolution_types`` for compatibility.  This module gives the same bounded
+conditional lineage Function-correct names without changing the historical
+serialized shape in one step.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Tuple
 
+from .activation_types import ActiveFunction, activate_promoted_artifact
 from .compiled_function_types import CompiledFunction
+from .contracts import BoundaryContext
 from .evolution_types import (
     CompilationRecord,
     ConditionalCompilationRecord,
@@ -17,8 +21,11 @@ from .evolution_types import (
     ConditionalFunctionCandidate,
     ConditionalRelationCandidate,
     ConditionalRuptureCoverage,
+    ConditionalRuptureRecord,
     ConditionalValidationRecord,
+    translate_conditional_ruptures_to_function,
 )
+from .promotion_types import PromotionDecision, evaluate_promotion
 
 
 @dataclass(frozen=True)
@@ -78,3 +85,72 @@ class ConditionalCompiledFunction:
     def artifact(self) -> CompiledFunction:
         """Canonical generic Function artifact used by lifecycle gates."""
         return self.generic_artifact
+
+
+@dataclass(frozen=True)
+class ConditionalFunctionPromotionRecord:
+    """Canonical promotion decision plus recoverable conditional lineage."""
+
+    artifact: ConditionalCompiledFunction
+    decision: PromotionDecision
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.artifact, ConditionalCompiledFunction):
+            raise TypeError("artifactはConditionalCompiledFunctionである必要があります")
+        if not isinstance(self.decision, PromotionDecision):
+            raise TypeError("decisionはPromotionDecisionである必要があります")
+        if self.decision.artifact != self.artifact.generic_artifact:
+            raise ValueError("PromotionDecisionのArtifactがConditionalCompiledFunctionと一致していません")
+
+
+@dataclass(frozen=True)
+class ConditionalFunctionActivationRecord:
+    """Canonical ActiveFunction plus recoverable conditional lineage."""
+
+    promotion: ConditionalFunctionPromotionRecord
+    active: ActiveFunction
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.promotion, ConditionalFunctionPromotionRecord):
+            raise TypeError("promotionはConditionalFunctionPromotionRecordである必要があります")
+        if not isinstance(self.active, ActiveFunction):
+            raise TypeError("activeはActiveFunctionである必要があります")
+        if self.active.artifact != self.promotion.artifact.generic_artifact:
+            raise ValueError("Active Function artifactがConditional lineageと一致していません")
+
+
+def evaluate_conditional_function_promotion(
+    artifact: ConditionalCompiledFunction,
+    ruptures: Tuple[ConditionalRuptureRecord, ...],
+    context: BoundaryContext,
+    *,
+    required_checks: Tuple[str, ...] = (),
+) -> ConditionalFunctionPromotionRecord:
+    """Evaluate canonical conditional Function promotion without losing lineage."""
+
+    if not isinstance(artifact, ConditionalCompiledFunction):
+        raise TypeError("artifactはConditionalCompiledFunctionである必要があります")
+    translated = translate_conditional_ruptures_to_function(
+        artifact.candidate.function_candidate,
+        artifact.conditional_candidate,
+        tuple(ruptures),
+    )
+    decision = evaluate_promotion(
+        artifact.generic_artifact,
+        context,
+        ruptures=translated,
+        required_checks=required_checks,
+    )
+    return ConditionalFunctionPromotionRecord(artifact, decision)
+
+
+def activate_conditional_function_promotion(
+    promotion: ConditionalFunctionPromotionRecord,
+    context: BoundaryContext,
+) -> ConditionalFunctionActivationRecord:
+    """Activate an approved canonical conditional Function explicitly."""
+
+    if not isinstance(promotion, ConditionalFunctionPromotionRecord):
+        raise TypeError("promotionはConditionalFunctionPromotionRecordである必要があります")
+    active = activate_promoted_artifact(promotion.decision, context)
+    return ConditionalFunctionActivationRecord(promotion, active)
