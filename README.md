@@ -8,7 +8,7 @@ RDL Enterpriseは、RDLの意味境界を業務AI Runtimeとして検証する�
 
 ## Project Status — Core v2.3 staged migration
 
-現在のmigration surfaceでは、P1–P7までを現在の有限テストBoundaryで実装済みです。
+現在のmigration surfaceでは、**P1–P9までを現在の有限テストBoundaryで実装済み**です。残る主要ゲートはP10のreal interaction acceptanceです。
 
 ```text
 raw request / later observation
@@ -34,7 +34,9 @@ Human Attention                    != H
 Function                           != M_B
 ```
 
-`EnterpriseRuntimeRIBBridge` では、後続 `RIBSection` をsame pre-update `M_B` / frozen interpretation contextで解釈し、canonical `Δ(F,F')` の未解決成分だけをoperational Hへ残します。旧 `e_input` はdiagnosticとして観測可能ですが、RIB bridge上のH / M_Δを直接駆動しません。
+`EnterpriseRuntimeRIBBridge` では、requestと後続observationsをそれぞれ `RIBSection` として取得し、same pre-update `M_B` / frozen interpretation contextで `F / F'` を形成します。canonical `Δ(F,F')` の未解決成分だけをoperational Hへ残し、旧 `e_input` はdiagnosticとして観測可能でもH / M_Δを直接駆動しません。
+
+Canonical `F / F'` formationは `RIBSection.to_business_input()` に依存しません。request / subsequent `RIBSection`、canonical mismatch、unresolved-mismatch state、coverage state、operational H adapter stateは、現在のsingle-writer SQLite Boundaryでrestartを跨いで保持されます。
 
 Function側では、正規名称として次を公開しています。
 
@@ -48,7 +50,7 @@ ConditionalFunctionActivationRecord
 
 旧 `CompiledMB` / `ConditionalCompiledMB` / `ActiveCompiledMB` 等は互換面として残します。型名が残ることは `Function = M_B` を意味しません。
 
-次の必須境界は **P8 — native Runtime cutover** です。現状のRIB bridgeは既存Runtime/Cascadeへcompatibility projectionして製品ライフサイクルを再利用しています。次段では、Authority、Persistence、Canary、staged commitment、frozen `M_B`、Provenance等の既存不変条件を保ちながら、RIBSectionをRuntimeの第一級入力へ移します。
+次の必須境界は **P10 — real interaction acceptance** です。read-only Jiraのreal-provider observationからcanonical `RIBSection → F → later RIBSection → F' → E` までを確認するlive testはありますが、**actual response/actionによって外部条件が変わり、その後のreal RIB_Bで差が観測される完全chain**はまだ未完了です。
 
 この進捗は完成宣言ではありません。
 
@@ -198,6 +200,24 @@ Simulation / replayで意味遷移に使う観測時刻は外生条件です。�
 
 現在の全テストでは、60日long-term lifecycleを含む条件固定replayがこの境界で通っています。これは指定されたSimulation条件での再現性であり、世界全体の決定論を意味しません。
 
+## Restart Durability Boundary
+
+現在のP9受入では、次の有限状態がsingle-writer SQLiteを介してrestartを跨ぎます。
+
+```text
+request RIBSection
+subsequent RIBSection
+F / F' lineage in CaseSnapshot
+canonical mismatch observation
+v23 unresolved-mismatch state
+v23 coverage state
+v23 operational H adapter state
+```
+
+timeoutでは、後続sectionが無い場合に `F' / E / H` を捏造せず、coverageだけを保持したままrestartできます。
+
+これは現在のSQLite Runtime Boundary内でのdurabilityであり、multi-process、distributed、tamper-proof durabilityを意味しません。
+
 ## Benchmark
 
 `benchmark_cost_curve.py`による合成ワークロードの観測値です。実API課金額ではなく、Tierごとのtoken-equivalentモデルです。
@@ -224,7 +244,9 @@ Windows + separate Python process + Bearer authentication
 
 これは現在のcredential、database、provider、localhost構成に対する有限な受入です。完全なsecret非漏洩や外部環境全般の安全性を証明するものではありません。
 
-real-provider observationを回収する部分経路はありますが、**real structural conflict → actual response → changed interaction conditions → later real RIB_B → F/F' → E** の完全な実運用chainはまだP10の未完了境界です。
+P10 live testは現在、real Jira observationを `EnterpriseRuntimeRIBBridge` へ入れ、request `RIBSection → F → later RIBSection → F' → canonical E/H` を確認する契約になっています。ただしread-onlyの連続観測ではissueが変化しない場合もあり、その場合 `E = 0` は正当です。
+
+したがって、**real structural conflict / actionable condition → actual response/action → changed interaction conditions → later real RIB_B → F/F' → E** の完全な実運用chainはまだP10の未完了境界です。
 
 ## これは確立していないこと
 
@@ -233,7 +255,6 @@ real-provider observationを回収する部分経路はありますが、**real 
 - universal secret non-leakage、Jira以外のprovider互換性
 - RDLの完全性や普遍的な真理性
 - 不可逆Toolのdurable Approval
-- canonical RIBSectionを第一級状態とするRuntime / persistenceの完全cutover
 - real structural conflictからresponse、later `RIB_B`、`F/F'`、`E/H`までの完全な実運用縦断
 
 ## Quick Start
@@ -308,6 +329,8 @@ src/rdl_core/conditional_compiled_function_types.py canonical conditional Functi
 src/rdl_enterprise/attention.py         bounded Human Attention aggregation
 src/rdl_enterprise/presentation.py      人間向け結果表示
 tests/test_runtime_rib_bridge.py        v2.3 bridge契約
+tests/test_runtime_rib_persistence.py   P9 canonical restart durability
+tests/test_p10_live_interaction.py      P10 live canonical RIB acceptance
 tests/test_compiled_function_migration.py Function migration契約
 tests/test_product_acceptance.py        製品受入・永続化・縦断テスト
 docs/INTERACTION_REFLECTION_PLAN_v0.3.md current v2.3 migration plan
@@ -319,14 +342,22 @@ docs/RDL_Product_Status_v0.1.md         製品Boundaryと残件
 
 ## 次の評価境界
 
-次の設計対象は無制限な抽象追加ではなく、現在のcompatibility projectionを一段外すことです。
+次の設計対象は新しい抽象を増やすことではなく、**P10のreal changed-condition chainを一本観測すること**です。
 
 ```text
-P8: RIBSection native Runtime cutover
+real condition / conflict
   ↓
-P9: canonical RIB / mismatch persistence + restart durability
+actual response / action
   ↓
-P10: one complete real interaction chain
+changed external interaction conditions
+  ↓
+later real RIB_B
+  ↓ same frozen pre-update M_B
+F'
+  ↓
+E = Δ(F,F')
+  ↓ unresolved when applicable
+H
 ```
 
-各段階で実際の破断や情報不足が現れた境界だけを、次の設計対象にします。
+この鎖を無理に作るのではなく、Boundary / Provenanceを回収できる実 interaction が得られた時点でP10受入を行います。
