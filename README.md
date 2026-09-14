@@ -4,34 +4,56 @@ RDL Enterpriseは、RDLの意味境界を業務AI Runtimeとして検証する�
 
 このリポジトリはRDLの完全実装や、世界の真理を決定するシステムを宣言しません。すべての一致、再現、十分性、安全性は、明示された有限Boundaryにおける性質です。
 
-## Project Status — 一旦停止
+現在の意味基準は **`Aporapeiron/RDL_Core` T0 BASE / SPEC v2.3** です。旧 `EFP`、`CompiledMB`、`xi_obs` 等は移行期間の互換名として残る場合がありますが、現行Coreの規範語彙ではありません。
 
-**2026-09-13時点で、本プロジェクトは現在の有限Boundaryにおける内部設計フェーズを一旦停止します。**
+## Project Status — Core v2.3 staged migration
 
-これは完成宣言でも放棄でもありません。現在までに、T0 BASE / SPEC v2.1に沿ったinteraction framing、static structural conflictのObservation化、same pre-update `M_B`による`F / F'`比較、既存の`E -> H`経路、Human Attentionの反復・Authority・dedupe・restart durabilityまでを、現在のlocalhost / single Runtime / single-writer SQLite Boundaryで operationally sufficient と判断しました。
-
-一方、実世界の完全なinteraction chainはまだ確立していません。
+現在のmigration surfaceでは、P1–P7までを現在の有限テストBoundaryで実装済みです。
 
 ```text
-real structural conflict
-  -> actual response
-  -> changed interaction conditions
-  -> subsequent real EFP'
-  -> same pre-update M_B
-  -> F / F'
-  -> E
-  -> unresolved residual -> H
-  -> Human Attention when necessary
+raw request / later observation
+        ↓ acquisition under Purpose / B
+      RIB_B(t) / RIB_B(t+Δ)
+        ↓ same pre-update M_B
+       F / F'
+        ↓
+   E = Δ(F, F')
+        ↓ unresolved only
+        H
 ```
 
-この実運用縦断は **NOT_EVALUATED / DEFERRED** として残します。Selective shadow、C10に基づくEFP生成条件の再検査、review lifecycleの追加拡張も、実際の破断や必要性が観測された場合にのみ再開します。
-
-再開条件は、現在の地図をさらに細かく描けることではなく、**現在のBoundaryで説明・処理できない実案件、明確な運用要求、既存不変条件の破断、または新しいprovider / 外界作用の必要性が現れること**です。
-
-停止時点の意味は次の通りです。
+現在までに明示化した主な境界は次です。
 
 ```text
-current finite Boundaryで operationally sufficient
+raw BusinessInput / FeedbackResult != RIB_B
+RIB_B                              != F
+static structural conflict         != E != H
+acquisition / coverage gap         != E != H
+coverage metric                    != ξ
+Human Attention                    != H
+Function                           != M_B
+```
+
+`EnterpriseRuntimeRIBBridge` では、後続 `RIBSection` をsame pre-update `M_B` / frozen interpretation contextで解釈し、canonical `Δ(F,F')` の未解決成分だけをoperational Hへ残します。旧 `e_input` はdiagnosticとして観測可能ですが、RIB bridge上のH / M_Δを直接駆動しません。
+
+Function側では、正規名称として次を公開しています。
+
+```text
+CompiledFunction
+ActiveFunction
+ConditionalCompiledFunction
+ConditionalFunctionPromotionRecord
+ConditionalFunctionActivationRecord
+```
+
+旧 `CompiledMB` / `ConditionalCompiledMB` / `ActiveCompiledMB` 等は互換面として残します。型名が残ることは `Function = M_B` を意味しません。
+
+次の必須境界は **P8 — native Runtime cutover** です。現状のRIB bridgeは既存Runtime/Cascadeへcompatibility projectionして製品ライフサイクルを再利用しています。次段では、Authority、Persistence、Canary、staged commitment、frozen `M_B`、Provenance等の既存不変条件を保ちながら、RIBSectionをRuntimeの第一級入力へ移します。
+
+この進捗は完成宣言ではありません。
+
+```text
+current finite test Boundaryで migration contract成立
 != terminally complete
 != universally valid
 != real-world interaction fully evaluated
@@ -52,11 +74,40 @@ RDL Enterpriseが目指すのは、常に正しい知識を持つAIではあり�
   -> 再び仕事を続ける
 ```
 
-したがって、RDLでは「一度成功した」「LLMがそう答えた」「権限者がそう言った」という事実を、そのままTruthへ昇格させません。Observation、Candidate、Commitment、Active、Authority、履歴を分離し、現在の有限Boundaryで何が使えるかを管理します。
+「一度成功した」「LLMがそう答えた」「権限者がそう言った」という事実を、そのままTruthへ昇格させません。Observation、Candidate、Commitment、Active、Authority、履歴を分離し、現在の有限Boundaryで何が使えるかを管理します。
 
-目標は完全性ではなく、**変化や破断を含む業務の中で、判断・再判断・手戻りのコストを下げながら運用を継続できること**です。
+## Core v2.3 interaction model
 
-## 現在動いているもの
+Enterpriseでは、raw eventをそのままCore `RIB_B` とみなしません。
+
+```text
+nonlinear relational network
+        │
+       SILN
+      ↕ ↕ ↕
+   RIB₁ RIB₂ RIB₃ ...
+        │
+        ↓ Purpose / B
+   M_B + RIB_B
+        ↓
+F = interp(M_B, RIB_B)
+```
+
+時間比較が必要な場合は、同じpre-update `M_B` と意味に影響する凍結条件を使います。
+
+```text
+RIB_B(t)     = Section_B({RIB_i(t)})
+F(t)         = interp(M_B, RIB_B(t))
+
+RIB_B(t+Δ)   = Section_B({RIB_i(t+Δ)})
+F'(t+Δ)      = interp(M_B, RIB_B(t+Δ))
+
+E(t+Δ)       = Δ(F, F')
+```
+
+`ξ` は有限Bで未回収となる関係であり、noise、missing rate、unknown count、coverage score、queue load等のobservable runtime quantityではありません。
+
+## 現在動いている製品経路
 
 現在の製品入口は、自然文からのread-only Jira/JSM照会です。
 
@@ -68,9 +119,9 @@ RDL Enterpriseが目指すのは、常に正しい知識を持つAIではあり�
 
 例えば、`IT-3って今どうなってる？`を受けると、対象issueを推測で補わず、`atlassian.jira.issue.lookup`のread-only Candidateを生成してから既存のAuthorityとTool boundaryを通してJiraを観測します。曖昧な`VPNの件どうなった？`は`UNRESOLVED`のまま実行しません。
 
-実証済みの製品経路は、自然文routing、Authority/domain scope検査、Jira応答の`case_id`・`summary`・`status`・`owner`へのbounded projection、`assignee=null`の`owner=None`保持、ActionLedger、SQLite永続化、別Pythonプロセスでの再起動復元です。実環境のJira issue `IT-3` / `IT-4`もread-only lookup確認済みです。
+実証済みの製品経路には、自然文routing、Authority/domain scope検査、Jira応答の`case_id`・`summary`・`status`・`owner`へのbounded projection、`assignee=null`の`owner=None`保持、ActionLedger、SQLite永続化、別Pythonプロセスでの再起動復元があります。
 
-Interaction Reflection側では、static structural conflictはそれ自体を`E`や`H`へ昇格させず、後続`EFP'`をsame pre-update `M_B`で再解釈して得た実残差だけを既存の`E -> H`経路へ通します。Human Attentionはsystem `H`とは分離され、単発差分ではなく同一interaction series上の反復またはsafety条件、かつ適切なAuthorityがある場合にのみbounded review requestを形成します。
+Interaction Reflection側では、static structural conflictはそれ自体を`E`や`H`へ昇格させません。後続interactionから別の `RIB_B(t+Δ)` が形成され、same pre-update `M_B`による `F'` と `Δ(F,F')` が成立した場合にのみCore mismatch候補になります。Human Attentionはsystem Hとは別のEnterprise-local review機構です。
 
 ## Operational Boundary
 
@@ -83,7 +134,7 @@ localhost (127.0.0.1)
   + durable ActionLedger
 ```
 
-外部credentialは環境変数から読み込み、内部結果、Ledger、SQLiteへ保存しません。Jiraの外部応答はそのまま内部状態へ流さず、必要な4項目へ投影します。
+外部credentialは環境変数から読み込み、内部結果、Ledger、SQLiteへ保存しません。Jiraの外部応答はそのまま内部状態へ流さず、必要な有限項目へ投影します。
 
 ## 守っている意味境界
 
@@ -97,9 +148,38 @@ UNKNOWN                   != UNRESOLVED != NOT_EVALUATED
 Similarity                != Rupture
 Structural Conflict       != E != H
 Human Attention load      != H
+Function                   != M_B
+RIB_B                      != F
+coverage gap               != ξ
 ```
 
 Candidate生成は実行を意味しません。read-only queryは明示的なreplay指定がない限り毎回providerを再観測します。provider observationやLedgerは有限な証跡であり、無条件の真実として扱いません。
+
+## Function lifecycle
+
+構造と演算成果物を分離します。
+
+```text
+M_B
+= SILNをBのもとで扱う有限な自己側・解釈構造断面
+
+Function
+= finite contractを持つ再利用可能なoperator
+```
+
+現行canonical lifecycleは次です。
+
+```text
+StructureCandidate
+→ FunctionCandidate
+→ CompilationRecord(PASSED)
+→ CompiledFunction
+→ PromotionDecision
+→ ActiveFunction
+→ Deactivation / Recompilation / Supersession
+```
+
+conditional lineageも `ConditionalCompiledFunction` から正規のPromotion / Activation経路を通せます。旧 `*CompiledMB` 名称群は後方互換のため残します。
 
 ## 知識沈澱とコスト軽量化
 
@@ -111,6 +191,12 @@ Tier 3で解けたことだけで、知識が自動的に`M_B`へ沈澱するわ
 ```
 
 反復構造、検証・教育、再利用回数によって低コスト経路へ移行し得ます。未学習パターンや人間確認が必要な案件が常に低コスト化することは主張しません。
+
+## Deterministic Simulation Boundary
+
+Simulation / replayで意味遷移に使う観測時刻は外生条件です。明示された `BusinessInput.created_at` は `FrozenInterpretationContext.constraint_evaluation_time` へ固定され、constraint freshnessが実wall clockへ暗黙依存しないようにします。
+
+現在の全テストでは、60日long-term lifecycleを含む条件固定replayがこの境界で通っています。これは指定されたSimulation条件での再現性であり、世界全体の決定論を意味しません。
 
 ## Benchmark
 
@@ -125,29 +211,30 @@ vs Pure LLM      -56.7%
 vs Standard RAG  -22.0%
 ```
 
-この削減率はtraffic mix、seed coverage、反復率、人間による知識供給に依存します。未学習のhardware系パターンはhuman overrideなしではTier 3に残留しました。これは再現条件付きの観測値であり、一般的な性能保証ではありません。
+この削減率はtraffic mix、seed coverage、反復率、人間による知識供給に依存します。これは再現条件付きの観測値であり、一般的な性能保証ではありません。
 
 ## Live Acceptance
 
 ```text
 Windows + separate Python process + Bearer authentication
-  + real Atlassian Jira + real IT-3 / IT-4 lookup
-  + owner=null preservation + SQLite + process restart
+  + real Atlassian Jira + bounded read-only lookup
+  + null owner preservation + SQLite + process restart
   + credential string not detected in tested DB
 ```
 
 これは現在のcredential、database、provider、localhost構成に対する有限な受入です。完全なsecret非漏洩や外部環境全般の安全性を証明するものではありません。
 
-Interaction Reflectionについては、real Jira observationからsubsequent real observationを`EFP'`として回収し、same pre-update `M_B`から`F'`および既存`E/H`経路へ接続する部分Observationまではあります。ただし、real structural conflictからactual responseを経て後続状態が変化する完全な実運用chainは未確立です。
+real-provider observationを回収する部分経路はありますが、**real structural conflict → actual response → changed interaction conditions → later real RIB_B → F/F' → E** の完全な実運用chainはまだP10の未完了境界です。
 
 ## これは確立していないこと
 
-- internet-facing security、人間のidentityそのものの証明
+- internet-facing security、人間identityそのものの証明
 - multi-process / distributed durability、tamper-proof audit
 - universal secret non-leakage、Jira以外のprovider互換性
 - RDLの完全性や普遍的な真理性
 - 不可逆Toolのdurable Approval
-- real structural conflictからresponse、subsequent `EFP'`、`E/H`までの完全な実運用縦断
+- canonical RIBSectionを第一級状態とするRuntime / persistenceの完全cutover
+- real structural conflictからresponse、later `RIB_B`、`F/F'`、`E/H`までの完全な実運用縦断
 
 ## Quick Start
 
@@ -202,40 +289,44 @@ python .\benchmark_manual_sedimentation.py
 ## 現在の主要構成
 
 ```text
-rdl_api.py                         localhost API起動入口
-rdl_query.py                       read-only query CLI
-src/rdl_enterprise/http_api.py     HTTP、Bearer、localhost boundary
-src/rdl_enterprise/business_query.py 自然文query orchestration
-src/rdl_enterprise/tool_routing.py Tool Candidate生成
-src/rdl_enterprise/tool_execution.py ToolRegistryと実行状態
+rdl_api.py                              localhost API起動入口
+rdl_query.py                            read-only query CLI
+src/rdl_enterprise/http_api.py          HTTP / Bearer / localhost boundary
+src/rdl_enterprise/business_query.py    自然文query orchestration
+src/rdl_enterprise/tool_routing.py      Tool Candidate生成
+src/rdl_enterprise/tool_execution.py    ToolRegistryと実行状態
 src/rdl_enterprise/atlassian_jira_provider.py Jira read-only adapter
-src/rdl_enterprise/service.py       認証済みservice境界
-src/rdl_enterprise/persistence.py   SQLite persistence
-src/rdl_enterprise/runtime.py       業務Runtimeとrestart recovery
-src/rdl_enterprise/attention.py     bounded Human Attention aggregation
-src/rdl_enterprise/presentation.py  人間向け結果表示
-tests/test_interaction_trace.py     interaction / Human Attention受入テスト
-tests/test_product_acceptance.py    製品受入・永続化・縦断テスト
-docs/INTERACTION_REFLECTION_PLAN_v0.2.md interaction reflection設計境界
-docs/RDL_Product_Status_v0.1.md     製品Boundaryと残件
+src/rdl_enterprise/service.py           認証済みservice境界
+src/rdl_enterprise/persistence.py       SQLite persistence
+src/rdl_enterprise/runtime.py           既存業務Runtime / compatibility lifecycle
+src/rdl_enterprise/interaction.py       RIBSection acquisition
+src/rdl_enterprise/runtime_rib_bridge.py Core v2.3 RIB / operational H bridge
+src/rdl_enterprise/mismatch_state.py    F/F' mismatch・coverage分離
+src/rdl_enterprise/operational_h.py     v2.3 operational H adapter
+src/rdl_core/compiled_function_types.py canonical CompiledFunction
+src/rdl_core/conditional_compiled_function_types.py canonical conditional Function lifecycle
+src/rdl_enterprise/attention.py         bounded Human Attention aggregation
+src/rdl_enterprise/presentation.py      人間向け結果表示
+tests/test_runtime_rib_bridge.py        v2.3 bridge契約
+tests/test_compiled_function_migration.py Function migration契約
+tests/test_product_acceptance.py        製品受入・永続化・縦断テスト
+docs/INTERACTION_REFLECTION_PLAN_v0.3.md current v2.3 migration plan
+docs/RDL_Core_v2.3_Migration_Audit.md   migration audit
+docs/RDL_Product_Status_v0.1.md         製品Boundaryと残件
 ```
 
-詳細なRDL原則、Coreの役割分離、参照先、Compiled M_Bの契約は`docs/`以下を参照してください。
+詳細な実装規律は `docs/RDL_Coding_Principles.md`、Function / M_B分離は `docs/RDL_Compiled_MB.md`、段階計画は `docs/INTERACTION_REFLECTION_PLAN_v0.3.md` を参照してください。
 
-## 再開時の次の評価境界
+## 次の評価境界
 
-現在、この評価は意図的に延期されています。再開する場合の最初の主対象は、基盤を無制限に拡張することではなく、real interaction chainを1本最後まで通すことです。
+次の設計対象は無制限な抽象追加ではなく、現在のcompatibility projectionを一段外すことです。
 
 ```text
-real structural conflict
-  -> actual response
-  -> changed interaction conditions
-  -> subsequent real EFP'
-  -> same pre-update M_B
-  -> F / F'
-  -> E
-  -> unresolved residual -> H
-  -> Human Attention when necessary
+P8: RIBSection native Runtime cutover
+  ↓
+P9: canonical RIB / mismatch persistence + restart durability
+  ↓
+P10: one complete real interaction chain
 ```
 
-必要なら、その実縦断で初めて現れた破断に対してのみSelective shadowまたはC10の再検査を開きます。実際の破断や情報不足が現れた境界だけを、次の設計対象にします。
+各段階で実際の破断や情報不足が現れた境界だけを、次の設計対象にします。
